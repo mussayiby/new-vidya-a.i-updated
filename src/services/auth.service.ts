@@ -118,26 +118,36 @@ function readableAuthError(
   return new Error(fallback);
 }
 
+function logAuthError(operation: string, error: unknown): void {
+  if (import.meta.env.DEV) {
+    console.error(`[Auth] ${operation} failed`, error);
+  }
+}
+
 async function ensureProfile(user: {
   id: string;
   email?: string | null;
   user_metadata?: Record<string, unknown>;
 }): Promise<void> {
-  const existingProfile =
-    await profileService.getForUser(user.id);
+  try {
+    const existingProfile =
+      await profileService.getForUser(user.id);
 
-  if (existingProfile) {
-    return;
+    if (existingProfile) {
+      return;
+    }
+
+    await profileService.save(
+      {
+        ...emptyProfile,
+        name: displayName(user),
+        email: user.email ?? "",
+      },
+      user.id,
+    );
+  } catch (error) {
+    logAuthError("Profile initialization", error);
   }
-
-  await profileService.save(
-    {
-      ...emptyProfile,
-      name: displayName(user),
-      email: user.email ?? "",
-    },
-    user.id,
-  );
 }
 
 export const authService = {
@@ -184,9 +194,10 @@ export const authService = {
     });
 
     if (error || !data.user) {
+      logAuthError("Sign-in", error);
       throw readableAuthError(
         error,
-        "Login failed. Please try again.",
+        "Authentication service is temporarily unavailable. Please try again.",
       );
     }
 
@@ -242,6 +253,7 @@ export const authService = {
     });
 
     if (error || !data.user) {
+      logAuthError("Sign-up", error);
       throw readableAuthError(
         error,
         "Unable to create the account. Please try again.",

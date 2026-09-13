@@ -8,6 +8,10 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { useApp } from "@/hooks/useApp";
 
+const DEMO_EMAIL = "demo@vidya.ai";
+const DEMO_PASSWORD = "anything123";
+const DEMO_LOGIN_KEY = "vidya_demo_logged_in";
+
 export const Route = createFileRoute("/login")({
   head: () => ({
     meta: [
@@ -51,6 +55,15 @@ function LoginPage() {
     setError(null);
     setLoading(true);
     try {
+      if (email.trim().toLowerCase() === DEMO_EMAIL && password === DEMO_PASSWORD) {
+        // TEMPORARY HACKATHON DEMO LOGIN
+        // Only bypasses Supabase authentication on the login page.
+        // Do not modify the rest of the application's authentication/data flow.
+        window.localStorage.setItem(DEMO_LOGIN_KEY, "true");
+        await navigate({ to: "/app/dashboard" });
+        return;
+      }
+
       await signIn(email, password);
       await navigate({ to: "/app/dashboard" });
     } catch (err) {
@@ -131,7 +144,7 @@ function LoginPage() {
           <CardFooter className="flex flex-col gap-3">
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-              Login
+              {loading ? "Logging in..." : "Login"}
             </Button>
             <p className="text-sm text-muted-foreground">
               Don&apos;t have an account?{" "}

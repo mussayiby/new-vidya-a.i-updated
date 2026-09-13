@@ -49,7 +49,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setUser(sessionUser);
 
         if (sessionUser) {
-          const currentProfile = await profileService.getForUser(sessionUser.id);
+          let currentProfile: StudentProfile | null = null;
+          try {
+            currentProfile = await profileService.getForUser(sessionUser.id);
+          } catch (error) {
+            if (import.meta.env.DEV) {
+              console.error("[Auth] Profile loading failed", error);
+            }
+          }
           setProfile(
             currentProfile ?? {
               ...emptyProfile,
@@ -125,7 +132,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(async (email: string, password: string) => {
     const account = await authService.signIn(email, password);
-    const currentProfile = await profileService.getForUser(account.id);
+    let currentProfile: StudentProfile | null = null;
+    try {
+      currentProfile = await profileService.getForUser(account.id);
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.error("[Auth] Profile loading failed after sign-in", error);
+      }
+    }
     setUser(account);
     setProfile(
       currentProfile ?? {
@@ -157,6 +171,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     await authService.signOut();
+    window.localStorage.removeItem("vidya_demo_logged_in");
     setUser(null);
     setProfile(emptyProfile);
   }, []);

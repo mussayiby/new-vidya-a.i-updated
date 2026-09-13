@@ -144,14 +144,17 @@ function AuthGate() {
   const location = useLocation();
   const navigate = useNavigate();
   const requiresAuth = location.pathname.startsWith("/app") || location.pathname.startsWith("/onboarding");
+  const demoLoggedIn =
+    typeof window !== "undefined" &&
+    window.localStorage.getItem("vidya_demo_logged_in") === "true";
 
   useEffect(() => {
-    if (ready && requiresAuth && !user) {
+    if (ready && requiresAuth && !user && !demoLoggedIn) {
       void navigate({ to: "/login", replace: true });
     }
-  }, [navigate, ready, requiresAuth, user]);
+  }, [demoLoggedIn, navigate, ready, requiresAuth, user]);
 
-  if (requiresAuth && (!ready || !user)) {
+  if (requiresAuth && (!ready || (!user && !demoLoggedIn))) {
     return <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">Loading...</div>;
   }
 
