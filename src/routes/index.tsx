@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
+import { languages } from "@/data/catalog";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -107,15 +108,20 @@ function LandingPage() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-md">
+      <header className="sticky top-0 z-50 border-b border-border/80 bg-background/85 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 md:px-6 lg:px-8">
           <Logo showTagline />
+          <nav className="hidden items-center gap-6 text-sm font-semibold text-muted-foreground md:flex" aria-label="Primary">
+            <a href="#features" className="transition-colors hover:text-primary">Platform</a>
+            <a href="#how-it-works" className="transition-colors hover:text-primary">How it works</a>
+            <Link to="/login" className="transition-colors hover:text-primary">Login</Link>
+          </nav>
           <div className="flex items-center gap-2 md:gap-3">
-            <Button variant="ghost" asChild>
+            <Button variant="ghost" className="hidden sm:inline-flex" asChild>
               <Link to="/login">Login</Link>
             </Button>
-            <Button asChild>
-              <Link to="/signup">Get started</Link>
+            <Button asChild className="group">
+              <Link to="/signup">Start learning <ArrowRight className="transition-transform group-hover:translate-x-1" /></Link>
             </Button>
           </div>
         </div>
@@ -124,59 +130,58 @@ function LandingPage() {
       {/* Hero */}
       <section className="relative overflow-hidden px-4 pt-16 pb-20 md:px-6 md:pt-24 md:pb-28 lg:px-8 lg:pt-32 lg:pb-36">
         <div className="pointer-events-none absolute inset-0 -z-10">
-          <div className="absolute top-0 left-1/2 h-[600px] w-[600px] -translate-x-1/2 rounded-full bg-gradient-soft opacity-40 blur-3xl" />
+          <div className="absolute -top-40 right-[-8rem] h-[34rem] w-[34rem] rounded-full bg-primary/10 blur-3xl" />
+          <div className="absolute bottom-[-12rem] left-[-10rem] h-[28rem] w-[28rem] rounded-full bg-primary-soft blur-3xl" />
         </div>
 
-        <div className="mx-auto max-w-7xl text-center">
-          <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-border bg-card px-4 py-1.5 text-sm font-medium text-muted-foreground shadow-card">
-            <Sparkles className="size-4 text-accent" />
-            <span>AI-powered learning for every student</span>
+        <div className="mx-auto grid max-w-7xl items-center gap-16 lg:grid-cols-[1.05fr_0.95fr]">
+          <div className="animate-fade-up max-w-3xl">
+            <div className="inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary-soft/60 px-4 py-1.5 text-sm font-semibold text-primary shadow-sm">
+              <Sparkles className="size-4" />
+              AI-powered learning for every student
+            </div>
+
+            <h1 className="mt-6 max-w-3xl text-5xl font-bold leading-[1.02] tracking-[-0.055em] text-foreground md:text-6xl lg:text-7xl">
+              Every learner has a language that unlocks <span className="text-gradient-brand">understanding.</span>
+            </h1>
+
+            <p className="mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground md:text-xl">
+              Vidya A.I. brings lessons, voice support, progress, and a personal AI tutor into one calm learning space built around how you learn best.
+            </p>
+
+            <div className="mt-8 flex flex-col items-start gap-3 sm:flex-row">
+              <Button size="lg" asChild className="group min-w-[180px]">
+                <Link to="/signup">Start learning <ArrowRight className="transition-transform group-hover:translate-x-1" /></Link>
+              </Button>
+              <Button size="lg" variant="outline" asChild className="min-w-[180px]">
+                <Link to="/login">Meet your AI tutor</Link>
+              </Button>
+            </div>
+
+            <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5"><CheckCircle2 className="size-4 text-primary" /> {languages.length} supported languages</span>
+              <span className="inline-flex items-center gap-1.5"><CheckCircle2 className="size-4 text-primary" /> Voice-ready tutor</span>
+              <span className="inline-flex items-center gap-1.5"><CheckCircle2 className="size-4 text-primary" /> Real progress tracking</span>
+            </div>
           </div>
 
-          <h1 className="mx-auto mt-6 max-w-4xl text-4xl font-extrabold tracking-tight text-foreground md:text-5xl lg:text-6xl">
-            Learn in your language. <br />
-            <span className="text-gradient-brand">Learn your way.</span>
-          </h1>
-
-          <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground md:text-xl">
-            Vidya A.I. is a multilingual learning platform that explains concepts, answers questions and tracks your progress in the language you think in.
-          </p>
-
-          <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Button size="lg" asChild className="group min-w-[180px]">
-              <Link to="/signup">
-                Start learning
-                <ArrowRight className="ml-2 size-4 transition-transform group-hover:translate-x-1" />
-              </Link>
-            </Button>
-            <Button size="lg" variant="outline" asChild className="min-w-[180px]">
-              <Link to="/login">Login</Link>
-            </Button>
-          </div>
-
-          <div className="mt-10 flex flex-wrap items-center justify-center gap-4 text-sm text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5">
-              <CheckCircle2 className="size-4 text-success" />
-              13 Indian languages
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <CheckCircle2 className="size-4 text-success" />
-              AI tutor
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <CheckCircle2 className="size-4 text-success" />
-              Progress tracking
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <CheckCircle2 className="size-4 text-success" />
-              Personalized lessons
-            </span>
+          <div className="relative mx-auto flex aspect-square w-full max-w-[30rem] items-center justify-center animate-fade-up [animation-delay:120ms]">
+            <div className="absolute inset-[9%] rounded-full border border-primary/10 bg-white/70 shadow-float backdrop-blur-sm" />
+            <div className="absolute inset-[17%] rounded-full border border-primary/15 animate-orbit" />
+            <div className="absolute inset-[27%] rounded-full border border-dashed border-primary/20 animate-orbit [animation-direction:reverse] [animation-duration:12s]" />
+            <div className="relative grid size-36 place-items-center rounded-[2rem] bg-gradient-brand text-primary-foreground shadow-float animate-breathe md:size-44">
+              <div className="absolute inset-3 rounded-[1.4rem] border border-white/25" />
+              <Sparkles className="size-14 md:size-16" />
+            </div>
+            <div className="absolute left-[8%] top-[23%] rounded-2xl border border-primary/10 bg-card px-3 py-2 text-xs font-semibold shadow-card">Learn at your pace</div>
+            <div className="absolute bottom-[20%] right-[3%] rounded-2xl border border-primary/10 bg-card px-3 py-2 text-xs font-semibold shadow-card">Ask anything</div>
+            <div className="absolute bottom-[8%] left-[20%] flex items-center gap-2 rounded-2xl border border-primary/10 bg-card px-3 py-2 text-xs font-semibold shadow-card"><span className="size-2 rounded-full bg-primary animate-pulse-red" /> AI is ready</div>
           </div>
         </div>
       </section>
 
       {/* Features */}
-      <section className="bg-secondary/30 px-4 py-20 md:px-6 md:py-24 lg:px-8">
+      <section id="features" className="bg-secondary/40 px-4 py-20 md:px-6 md:py-24 lg:px-8">
         <div className="mx-auto max-w-7xl">
           <div className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl font-bold tracking-tight text-foreground md:text-4xl">
@@ -191,9 +196,9 @@ function LandingPage() {
             {features.map((feature) => (
               <div
                 key={feature.title}
-                className="rounded-2xl border border-border bg-card p-6 shadow-card transition-transform hover:-translate-y-0.5"
+                className="group rounded-2xl border border-border/80 bg-card p-6 shadow-card transition-all duration-300 hover:-translate-y-1 hover:border-primary/20 hover:shadow-float"
               >
-                <span className="grid size-11 place-items-center rounded-xl bg-primary-soft text-primary">
+                <span className="grid size-11 place-items-center rounded-xl bg-primary-soft text-primary transition-transform duration-300 group-hover:scale-110">
                   <feature.icon className="size-5" />
                 </span>
                 <h3 className="mt-4 text-lg font-semibold text-foreground">
@@ -209,7 +214,7 @@ function LandingPage() {
       </section>
 
       {/* How it works */}
-      <section className="px-4 py-20 md:px-6 md:py-24 lg:px-8">
+      <section id="how-it-works" className="px-4 py-20 md:px-6 md:py-24 lg:px-8">
         <div className="mx-auto max-w-7xl">
           <div className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl font-bold tracking-tight text-foreground md:text-4xl">
@@ -224,7 +229,7 @@ function LandingPage() {
             {steps.map((step) => (
               <div
                 key={step.number}
-                className="relative rounded-2xl border border-border bg-card p-6 shadow-card"
+                className="relative rounded-2xl border border-border/80 bg-card p-6 shadow-card transition-all duration-300 hover:-translate-y-1 hover:border-primary/20 hover:shadow-float"
               >
                 <span className="text-4xl font-extrabold text-primary/20">
                   {step.number}
@@ -244,7 +249,7 @@ function LandingPage() {
       {/* CTA banner */}
       <section className="px-4 pb-20 md:px-6 md:pb-24 lg:px-8">
         <div className="mx-auto max-w-7xl">
-          <div className="relative overflow-hidden rounded-3xl bg-gradient-brand px-6 py-12 text-center text-primary-foreground md:px-12 md:py-16">
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-brand px-6 py-12 text-center text-primary-foreground shadow-float md:px-12 md:py-16">
             <div className="relative z-10">
               <h2 className="text-3xl font-bold tracking-tight md:text-4xl">
                 Ready to start learning smarter?

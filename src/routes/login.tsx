@@ -5,12 +5,15 @@ import { Eye, EyeOff, GraduationCap, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardFooter,
+} from "@/components/ui/card";
 import { useApp } from "@/hooks/useApp";
-
-const DEMO_EMAIL = "demo@vidya.ai";
-const DEMO_PASSWORD = "anything123";
-const DEMO_LOGIN_KEY = "vidya_demo_logged_in";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -55,15 +58,6 @@ function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      if (email.trim().toLowerCase() === DEMO_EMAIL && password === DEMO_PASSWORD) {
-        // TEMPORARY HACKATHON DEMO LOGIN
-        // Only bypasses Supabase authentication on the login page.
-        // Do not modify the rest of the application's authentication/data flow.
-        window.localStorage.setItem(DEMO_LOGIN_KEY, "true");
-        await navigate({ to: "/app/dashboard" });
-        return;
-      }
-
       await signIn(email, password);
       await navigate({ to: "/app/dashboard" });
     } catch (err) {
@@ -74,9 +68,11 @@ function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-soft px-4 py-12">
-      <Link to="/" className="mb-8 inline-flex items-center gap-2">
-        <span className="grid size-10 place-items-center rounded-xl bg-gradient-brand text-primary-foreground shadow-float">
+    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-background px-4 py-12">
+      <div className="pointer-events-none absolute -top-32 -right-32 size-[28rem] rounded-full bg-primary/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-40 -left-32 size-[26rem] rounded-full bg-primary-soft blur-3xl" />
+      <Link to="/" className="relative z-10 mb-8 inline-flex items-center gap-2">
+        <span className="grid size-10 place-items-center rounded-xl bg-gradient-brand text-primary-foreground shadow-float animate-breathe">
           <GraduationCap className="size-5" />
         </span>
         <span className="text-xl font-extrabold tracking-tight">
@@ -84,8 +80,11 @@ function LoginPage() {
         </span>
       </Link>
 
-      <Card className="w-full max-w-md shadow-float">
+      <Card className="relative z-10 w-full max-w-md border-border/80 bg-card/95 shadow-float backdrop-blur-sm">
         <CardHeader className="text-center">
+          <div className="mx-auto mb-3 grid size-11 place-items-center rounded-2xl bg-primary-soft text-primary">
+            <GraduationCap className="size-5" />
+          </div>
           <CardTitle className="text-2xl">Welcome back</CardTitle>
           <CardDescription>Sign in to continue learning in your language.</CardDescription>
         </CardHeader>
@@ -93,7 +92,7 @@ function LoginPage() {
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
             {error && (
-              <div className="rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              <div className="animate-fade-up rounded-lg border border-destructive/15 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                 {error}
               </div>
             )}
@@ -135,7 +134,10 @@ function LoginPage() {
             </div>
 
             <div className="text-right">
-              <Link to="/forgot-password" className="text-sm font-medium text-primary hover:underline">
+              <Link
+                to="/forgot-password"
+                className="text-sm font-medium text-primary hover:underline"
+              >
                 Forgot password?
               </Link>
             </div>

@@ -1,17 +1,6 @@
-import {
-  createContext,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { authService, type AuthUser, type SignUpResult } from "@/services/auth.service";
-import {
-  emptyProfile,
-  profileService,
-  type StudentProfile,
-} from "@/services/profile.service";
+import { emptyProfile, profileService, type StudentProfile } from "@/services/profile.service";
 import { dashboardAnalyticsService } from "@/services/dashboard-analytics.service";
 import { getLesson } from "@/data/subjects";
 
@@ -101,34 +90,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const updateProfile = useCallback(async (patch: Partial<StudentProfile>) => {
-    const nextProfile = { ...profile, ...patch };
-    setProfile(nextProfile);
+  const updateProfile = useCallback(
+    async (patch: Partial<StudentProfile>) => {
+      const nextProfile = { ...profile, ...patch };
+      setProfile(nextProfile);
 
-    if (!user?.id) return;
+      if (!user?.id) return;
 
-    const savedProfile = await profileService.save(nextProfile, user.id);
-    setProfile(savedProfile);
-  }, [profile, user?.id]);
+      const savedProfile = await profileService.save(nextProfile, user.id);
+      setProfile(savedProfile);
+    },
+    [profile, user?.id],
+  );
 
-  const toggleLessonComplete = useCallback((lessonId: string) => {
-    setCompletedLessons((prev) => {
-      const isCompleting = !prev.includes(lessonId);
-      const next = isCompleting
-        ? [...prev, lessonId]
-        : prev.filter((id) => id !== lessonId);
-      window.localStorage.setItem(COMPLETED_KEY, JSON.stringify(next));
+  const toggleLessonComplete = useCallback(
+    (lessonId: string) => {
+      setCompletedLessons((prev) => {
+        const isCompleting = !prev.includes(lessonId);
+        const next = isCompleting ? [...prev, lessonId] : prev.filter((id) => id !== lessonId);
+        window.localStorage.setItem(COMPLETED_KEY, JSON.stringify(next));
 
-      // Record analytics event when completing
-      if (isCompleting && user?.id) {
-        const lesson = getLesson(lessonId);
-        const duration = lesson?.duration ?? 12;
-        dashboardAnalyticsService.recordCompletion(user.id, lessonId, duration);
-      }
+        // Record analytics event when completing
+        if (isCompleting && user?.id) {
+          const lesson = getLesson(lessonId);
+          const duration = lesson?.duration ?? 12;
+          dashboardAnalyticsService.recordCompletion(user.id, lessonId, duration);
+        }
 
-      return next;
-    });
-  }, [user?.id]);
+        return next;
+      });
+    },
+    [user?.id],
+  );
 
   const signIn = useCallback(async (email: string, password: string) => {
     const account = await authService.signIn(email, password);
@@ -151,27 +144,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return account;
   }, []);
 
-  const signUp = useCallback(
-    async (name: string, email: string, password: string) => {
-      const result = await authService.signUp(name, email, password);
-      if (result.requiresEmailConfirmation) return result;
+  const signUp = useCallback(async (name: string, email: string, password: string) => {
+    const result = await authService.signUp(name, email, password);
+    if (result.requiresEmailConfirmation) return result;
 
-      const account = result.account;
-      const nextProfile = {
-        ...emptyProfile,
-        name: account.name,
-        email: account.email,
-      };
-      setUser(account);
-      setProfile(nextProfile);
-      return result;
-    },
-    [],
-  );
+    const account = result.account;
+    const nextProfile = {
+      ...emptyProfile,
+      name: account.name,
+      email: account.email,
+    };
+    setUser(account);
+    setProfile(nextProfile);
+    return result;
+  }, []);
 
   const signOut = useCallback(async () => {
     await authService.signOut();
-    window.localStorage.removeItem("vidya_demo_logged_in");
     setUser(null);
     setProfile(emptyProfile);
   }, []);

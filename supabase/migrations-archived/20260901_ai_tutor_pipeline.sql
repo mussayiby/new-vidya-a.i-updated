@@ -597,6 +597,238 @@ create table if not exists public.ai_lesson_student_progress (
 );
 
 
+-- ============================================================
+-- 8. RECONCILE TABLES CREATED BY THE BASE LESSON MIGRATION
+-- ============================================================
+-- 20260831 creates the core lesson tables first. The CREATE TABLE
+-- IF NOT EXISTS statements above do not add columns when those tables
+-- already exist, so make the pipeline additions explicit and idempotent.
+
+alter table public.ai_lesson_processing_jobs
+  add column if not exists source_media_id uuid null,
+  add column if not exists progress_percent integer not null default 0,
+  add column if not exists current_stage text null,
+  add column if not exists provider_job_id text null,
+  add column if not exists started_at timestamptz null,
+  add column if not exists completed_at timestamptz null;
+
+alter table public.ai_lesson_topics
+  add column if not exists topic_number integer null,
+  add column if not exists transcript text null,
+  add column if not exists source_language text not null default 'en',
+  add column if not exists status text not null default 'detected',
+  add column if not exists mastery_threshold numeric not null default 0.70,
+  add column if not exists updated_at timestamptz not null default now();
+
+alter table public.ai_lesson_questions
+  add column if not exists question_number integer null,
+  add column if not exists language_code text not null default 'en',
+  add column if not exists status text not null default 'ready',
+  add column if not exists updated_at timestamptz not null default now();
+
+alter table public.ai_lesson_media
+  add column if not exists updated_at timestamptz not null default now();
+
+update public.ai_lesson_topics
+set topic_number = order_index
+where topic_number is null;
+
+alter table public.ai_lesson_topics
+  alter column topic_number set not null;
+
+with numbered_questions as (
+  select
+    id,
+    row_number() over (
+      partition by lesson_id, topic_id
+      order by coalesce(order_index, 2147483647), id
+    )::integer as generated_question_number
+  from public.ai_lesson_questions
+  where question_number is null
+)
+update public.ai_lesson_questions as questions
+set question_number = numbered_questions.generated_question_number
+from numbered_questions
+where questions.id = numbered_questions.id;
+
+alter table public.ai_lesson_questions
+  alter column question_number set not null;
+
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'ai_lesson_questions'
+      and column_name = 'options'
+      and udt_name = '_text'
+  ) then
+    alter table public.ai_lesson_questions
+      alter column options type jsonb
+      using to_jsonb(options);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'ai_lesson_processing_jobs_source_media_id_fkey'
+  ) then
+    alter table public.ai_lesson_processing_jobs
+      add constraint ai_lesson_processing_jobs_source_media_id_fkey
+      foreign key (source_media_id)
+      references public.ai_lesson_media(id)
+      on delete set null;
+  end if;
+end $$;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'ai_lesson_processing_jobs_job_type_check'
+  ) then
+    alter table public.ai_lesson_processing_jobs
+      drop constraint ai_lesson_processing_jobs_job_type_check;
+  end if;
+
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'ai_lesson_processing_jobs_type_check'
+  ) then
+    alter table public.ai_lesson_processing_jobs
+      drop constraint ai_lesson_processing_jobs_type_check;
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'ai_lesson_processing_jobs_type_check'
+  ) then
+    alter table public.ai_lesson_processing_jobs
+      add constraint ai_lesson_processing_jobs_type_check
+      check (
+        job_type = any (array[
+          'full_lesson'::text,
+          'transcription'::text,
+          'segmentation'::text,
+          'translation'::text,
+          'voice_generation'::text,
+          'video_generation'::text,
+          'narration'::text,
+          'questions'::text,
+          'remedial_lesson'::text
+        ])
+      );
+  end if;
+end $$;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'ai_lesson_processing_jobs_status_check'
+  ) then
+    alter table public.ai_lesson_processing_jobs
+      drop constraint ai_lesson_processing_jobs_status_check;
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'ai_lesson_processing_jobs_status_check'
+  ) then
+    alter table public.ai_lesson_processing_jobs
+      add constraint ai_lesson_processing_jobs_status_check
+      check (status = any (array[
+        'pending'::text,
+        'queued'::text,
+        'processing'::text,
+        'completed'::text,
+        'failed'::text,
+        'cancelled'::text
+      ]));
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'ai_lesson_processing_jobs_progress_check'
+  ) then
+    alter table public.ai_lesson_processing_jobs
+      add constraint ai_lesson_processing_jobs_progress_check
+      check (progress_percent >= 0 and progress_percent <= 100);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'ai_lesson_topics_topic_number_check'
+  ) then
+    alter table public.ai_lesson_topics
+      add constraint ai_lesson_topics_topic_number_check
+      check (topic_number >= 1);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'ai_lesson_topics_mastery_threshold_check'
+  ) then
+    alter table public.ai_lesson_topics
+      add constraint ai_lesson_topics_mastery_threshold_check
+      check (mastery_threshold > 0 and mastery_threshold <= 1);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'ai_lesson_topics_status_check'
+  ) then
+    alter table public.ai_lesson_topics
+      add constraint ai_lesson_topics_status_check
+      check (status = any (array[
+        'detected'::text,
+        'processing'::text,
+        'ready'::text,
+        'failed'::text
+      ]));
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'ai_lesson_media_purpose_check'
+  ) then
+    alter table public.ai_lesson_media
+      add constraint ai_lesson_media_purpose_check
+      check (media_purpose = any (array[
+        'source'::text,
+        'translated_audio'::text,
+        'translated_video'::text,
+        'avatar_video'::text,
+        'remedial_video'::text,
+        'remedial_audio'::text
+      ]));
+  end if;
+end $$;
+
+
 create index if not exists
   ai_lesson_student_progress_student_id_idx
 on public.ai_lesson_student_progress(student_id);
@@ -690,6 +922,91 @@ create trigger
 before update on public.ai_lesson_student_progress
 for each row
 execute function public.update_ai_tutor_updated_at();
+
+
+-- ============================================================
+-- 10. PIPELINE RLS AND GRANTS
+-- ============================================================
+-- Processing jobs remain service-role only. Student-facing pipeline
+-- records are restricted to the authenticated student or published lesson.
+
+alter table public.ai_lesson_topic_translations enable row level security;
+alter table public.ai_lesson_question_attempts enable row level security;
+alter table public.ai_lesson_student_progress enable row level security;
+
+drop policy if exists "Published lesson translations visible to viewers"
+on public.ai_lesson_topic_translations;
+
+create policy "Published lesson translations visible to viewers"
+on public.ai_lesson_topic_translations
+for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.ai_lesson_topics
+    join public.ai_lessons on ai_lessons.id = ai_lesson_topics.lesson_id
+    where ai_lesson_topics.id = ai_lesson_topic_translations.topic_id
+      and (
+        ai_lessons.teacher_id = auth.uid()::text
+        or ai_lessons.published = true
+      )
+  )
+);
+
+drop policy if exists "Students can insert own question attempts"
+on public.ai_lesson_question_attempts;
+
+create policy "Students can insert own question attempts"
+on public.ai_lesson_question_attempts
+for insert
+to authenticated
+with check (student_id = auth.uid());
+
+drop policy if exists "Students can read own question attempts"
+on public.ai_lesson_question_attempts;
+
+create policy "Students can read own question attempts"
+on public.ai_lesson_question_attempts
+for select
+to authenticated
+using (student_id = auth.uid());
+
+drop policy if exists "Students can read own topic progress"
+on public.ai_lesson_student_progress;
+
+create policy "Students can read own topic progress"
+on public.ai_lesson_student_progress
+for select
+to authenticated
+using (student_id = auth.uid());
+
+drop policy if exists "Students can insert own topic progress"
+on public.ai_lesson_student_progress;
+
+create policy "Students can insert own topic progress"
+on public.ai_lesson_student_progress
+for insert
+to authenticated
+with check (student_id = auth.uid());
+
+drop policy if exists "Students can update own topic progress"
+on public.ai_lesson_student_progress;
+
+create policy "Students can update own topic progress"
+on public.ai_lesson_student_progress
+for update
+to authenticated
+using (student_id = auth.uid())
+with check (student_id = auth.uid());
+
+grant select on public.ai_lesson_topic_translations to authenticated;
+grant select, insert on public.ai_lesson_question_attempts to authenticated;
+grant select, insert, update on public.ai_lesson_student_progress to authenticated;
+
+grant all on public.ai_lesson_topic_translations to service_role;
+grant all on public.ai_lesson_question_attempts to service_role;
+grant all on public.ai_lesson_student_progress to service_role;
 
 
 -- ============================================================

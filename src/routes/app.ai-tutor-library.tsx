@@ -35,17 +35,17 @@ interface Lesson {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  uploaded: "bg-blue-100 text-blue-800",
-  queued: "bg-yellow-100 text-yellow-800",
-  processing: "bg-yellow-100 text-yellow-800",
-  transcribing: "bg-purple-100 text-purple-800",
-  segmenting: "bg-purple-100 text-purple-800",
-  translating: "bg-indigo-100 text-indigo-800",
-  generating_narration: "bg-indigo-100 text-indigo-800",
-  generating_questions: "bg-pink-100 text-pink-800",
-  ready: "bg-green-100 text-green-800",
-  published: "bg-green-100 text-green-800",
-  failed: "bg-red-100 text-red-800",
+  uploaded: "bg-primary-soft text-primary",
+  queued: "bg-warning/15 text-warning-foreground",
+  processing: "bg-warning/15 text-warning-foreground",
+  transcribing: "bg-primary-soft text-primary",
+  segmenting: "bg-primary-soft text-primary",
+  translating: "bg-primary-soft text-primary",
+  generating_narration: "bg-primary-soft text-primary",
+  generating_questions: "bg-accent-soft text-accent",
+  ready: "bg-success/15 text-success",
+  published: "bg-success/15 text-success",
+  failed: "bg-destructive/10 text-destructive",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -92,7 +92,7 @@ function AITutorLibraryPage() {
   };
 
   const getStatusColor = (status: string) => {
-    return STATUS_COLORS[status] || "bg-gray-100 text-gray-800";
+    return STATUS_COLORS[status] || "bg-muted text-muted-foreground";
   };
 
   const getStatusLabel = (status: string) => {
@@ -184,7 +184,7 @@ function AITutorLibraryPage() {
 
                     {/* Processing Status */}
                     {isProcessing(lesson.status) && (
-                      <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-700">
+                      <div className="mt-3 rounded border border-primary/15 bg-primary-soft p-3 text-sm text-primary">
                         Processing in progress... This may take a few minutes depending on media length.
                       </div>
                     )}

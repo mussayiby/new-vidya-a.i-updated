@@ -37,17 +37,17 @@ interface Lesson {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  uploaded: "bg-blue-100 text-blue-800",
-  queued: "bg-yellow-100 text-yellow-800",
-  processing: "bg-yellow-100 text-yellow-800",
-  transcribing: "bg-purple-100 text-purple-800",
-  segmenting: "bg-purple-100 text-purple-800",
-  translating: "bg-indigo-100 text-indigo-800",
-  generating_narration: "bg-indigo-100 text-indigo-800",
-  generating_questions: "bg-pink-100 text-pink-800",
-  ready: "bg-green-100 text-green-800",
-  published: "bg-green-100 text-green-800",
-  failed: "bg-red-100 text-red-800",
+  uploaded: "bg-primary-soft text-primary",
+  queued: "bg-warning/15 text-warning-foreground",
+  processing: "bg-warning/15 text-warning-foreground",
+  transcribing: "bg-primary-soft text-primary",
+  segmenting: "bg-primary-soft text-primary",
+  translating: "bg-primary-soft text-primary",
+  generating_narration: "bg-primary-soft text-primary",
+  generating_questions: "bg-accent-soft text-accent",
+  ready: "bg-success/15 text-success",
+  published: "bg-success/15 text-success",
+  failed: "bg-destructive/10 text-destructive",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -143,7 +143,7 @@ function LessonDetailPage() {
         <main className="px-4 py-8 sm:px-6 lg:px-8">
           <Card className="p-12">
             <div className="text-center">
-              <AlertCircle className="size-12 text-red-500 mx-auto mb-4" />
+              <AlertCircle className="mx-auto mb-4 size-12 text-destructive" />
               <h3 className="text-lg font-semibold mb-2">Lesson not found</h3>
               <Button
                 variant="outline"
@@ -187,27 +187,27 @@ function LessonDetailPage() {
         <div className="space-y-6 max-w-4xl">
           {/* Processing Status */}
           {isProcessing ? (
-            <Card className="p-6 bg-blue-50 border-blue-200">
+            <Card className="border-primary/15 bg-primary-soft p-6">
               <div className="space-y-4">
                 <div className="flex items-center gap-3">
-                  <Loader2 className="size-5 text-blue-600 animate-spin" />
-                  <h3 className="font-semibold text-blue-900">
+                  <Loader2 className="size-5 animate-spin text-primary" />
+                  <h3 className="font-semibold text-primary">
                     Processing Your Lesson ({STATUS_LABELS[lesson.status]})
                   </h3>
                 </div>
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
-                    <span className="text-blue-700">Progress</span>
-                    <span className="text-blue-700">{Math.round(getStatusProgress(lesson.status))}%</span>
+                    <span className="text-primary">Progress</span>
+                    <span className="text-primary">{Math.round(getStatusProgress(lesson.status))}%</span>
                   </div>
-                  <div className="w-full bg-blue-200 rounded-full h-2">
+                  <div className="h-2 w-full rounded-full bg-primary/15">
                     <div
-                      className="bg-blue-600 h-2 rounded-full transition-all"
+                      className="h-2 rounded-full bg-primary transition-all"
                       style={{ width: `${getStatusProgress(lesson.status)}%` }}
                     />
                   </div>
                 </div>
-                <p className="text-sm text-blue-700">
+                <p className="text-sm text-primary">
                   This process typically takes 5-15 minutes depending on media length. You can leave this page and come back later.
                 </p>
               </div>
@@ -237,12 +237,12 @@ function LessonDetailPage() {
               </div>
             </Card>
           ) : lesson.status === "ready" || lesson.status === "published" ? (
-            <Card className="p-6 bg-green-50 border-green-200">
+            <Card className="border-success/20 bg-success/10 p-6">
               <div className="flex gap-4">
-                <CheckCircle2 className="size-6 text-green-600 flex-shrink-0 mt-0.5" />
+                <CheckCircle2 className="mt-0.5 size-6 shrink-0 text-success" />
                 <div>
-                  <h3 className="font-semibold text-green-900">Ready for Students!</h3>
-                  <p className="text-sm text-green-700 mt-1">
+                  <h3 className="font-semibold text-success">Ready for Students!</h3>
+                  <p className="mt-1 text-sm text-success">
                     Your lesson has been fully processed and is ready. 
                     {!lesson.published && " Publish it to make it available to students."}
                   </p>

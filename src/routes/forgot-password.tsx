@@ -49,9 +49,10 @@ function ForgotPasswordPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-soft px-4 py-12">
-      <Link to="/" className="mb-8 inline-flex items-center gap-2">
-        <span className="grid size-10 place-items-center rounded-xl bg-gradient-brand text-primary-foreground shadow-float">
+    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-background px-4 py-12">
+      <div className="pointer-events-none absolute -top-32 right-[-8rem] size-[28rem] rounded-full bg-primary/10 blur-3xl" />
+      <Link to="/" className="relative z-10 mb-8 inline-flex items-center gap-2">
+        <span className="grid size-10 place-items-center rounded-xl bg-gradient-brand text-primary-foreground shadow-float animate-breathe">
           <GraduationCap className="size-5" />
         </span>
         <span className="text-xl font-extrabold tracking-tight">
@@ -59,7 +60,7 @@ function ForgotPasswordPage() {
         </span>
       </Link>
 
-      <Card className="w-full max-w-md shadow-float">
+      <Card className="relative z-10 w-full max-w-md border-border/80 bg-card/95 shadow-float backdrop-blur-sm">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl">Reset password</CardTitle>
           <CardDescription>Enter your email and we&apos;ll send you a reset link.</CardDescription>
@@ -79,7 +80,7 @@ function ForgotPasswordPage() {
           <form onSubmit={handleSubmit}>
             <CardContent className="space-y-4">
               {error && (
-                <div className="rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                <div className="animate-fade-up rounded-lg border border-destructive/15 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                   {error}
                 </div>
               )}

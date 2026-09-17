@@ -25,7 +25,7 @@ export function StatCard({
   return (
     <div
       className={cn(
-        "rounded-2xl border border-border bg-card p-5 shadow-card transition-transform hover:-translate-y-0.5",
+        "group rounded-2xl border border-border/80 bg-card p-5 shadow-card transition-all duration-300 hover:-translate-y-1 hover:border-primary/20 hover:shadow-float",
         className,
       )}
     >
@@ -34,7 +34,7 @@ export function StatCard({
           <p className="text-sm text-muted-foreground">{label}</p>
           <p className="mt-1 text-2xl font-bold tracking-tight">{value}</p>
         </div>
-        <span className={cn("grid size-10 place-items-center rounded-xl", accents[accent])}>
+        <span className={cn("grid size-10 place-items-center rounded-xl transition-transform duration-300 group-hover:scale-110", accents[accent])}>
           <Icon className="size-5" />
         </span>
       </div>

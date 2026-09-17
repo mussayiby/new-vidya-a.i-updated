@@ -69,28 +69,36 @@ function DashboardPage() {
 
   return (
     <AppShell>
-      <main className="px-4 py-8 sm:px-6 lg:px-8">
-        <h1 className="text-2xl font-bold tracking-tight">
+      <main className="animate-fade-up px-4 py-8 sm:px-6 lg:px-8">
+        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Your learning space</p>
+            <h1 className="mt-2 text-3xl font-bold tracking-tight">
           Welcome back, {profile.name || user?.name || "Student"}
-        </h1>
-        <p className="mt-1 text-muted-foreground">
+            </h1>
+          </div>
+          <Link to="/app/tutor" className="group inline-flex items-center gap-2 text-sm font-semibold text-primary">
+            Ask your AI tutor <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
+          </Link>
+        </div>
+        <p className="mt-2 max-w-2xl text-muted-foreground">
           {hasProgress
             ? "Your progress is being tracked from your actual activity."
             : "No learning activity has been recorded yet."}
         </p>
 
         <section className="mt-6 grid gap-4 sm:grid-cols-2">
-          <Link to="/app/live/create" className="group rounded-2xl border border-primary/20 bg-primary-soft p-5 transition-colors hover:border-primary/40">
-            <Radio className="size-5 text-primary" />
+          <Link to="/app/live/create" className="group rounded-2xl border border-primary/20 bg-gradient-to-br from-primary-soft to-card p-5 shadow-card transition-all duration-300 hover:-translate-y-1 hover:border-primary/40 hover:shadow-float">
+            <Radio className="size-5 text-primary transition-transform group-hover:scale-110" />
             <h2 className="mt-4 font-semibold">Create a live class</h2>
             <p className="mt-1 text-sm text-muted-foreground">Teach students in their own language.</p>
             <span className="mt-4 flex items-center gap-2 text-sm font-semibold text-primary">Start creating <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" /></span>
           </Link>
-          <Link to="/app/live/join" className="group rounded-2xl border border-border bg-card p-5 shadow-card transition-colors hover:border-accent/40">
-            <LogIn className="size-5 text-accent" />
+          <Link to="/app/live/join" className="group rounded-2xl border border-border/80 bg-card p-5 shadow-card transition-all duration-300 hover:-translate-y-1 hover:border-primary/30 hover:shadow-float">
+            <LogIn className="size-5 text-primary transition-transform group-hover:scale-110" />
             <h2 className="mt-4 font-semibold">Join a live class</h2>
             <p className="mt-1 text-sm text-muted-foreground">Follow your teacher in your mother tongue.</p>
-            <span className="mt-4 flex items-center gap-2 text-sm font-semibold text-accent">Enter class code <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" /></span>
+            <span className="mt-4 flex items-center gap-2 text-sm font-semibold text-primary">Enter class code <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" /></span>
           </Link>
         </section>
 
@@ -128,7 +136,7 @@ function DashboardPage() {
           />
         </div>
 
-        <section className="mt-6 rounded-2xl border border-border bg-card p-5 shadow-card">
+        <section className="mt-6 rounded-2xl border border-border/80 bg-card p-5 shadow-card">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold">Today's goal</h2>
             <span className="text-sm text-muted-foreground">
@@ -154,7 +162,7 @@ function DashboardPage() {
                   />
                 ))
               ) : (
-                <div className="rounded-2xl border border-dashed border-border bg-muted/30 p-6 text-sm text-muted-foreground">
+                <div className="rounded-2xl border border-dashed border-primary/20 bg-primary-soft/40 p-6 text-sm text-muted-foreground">
                   No lessons are available for recommendation yet.
                 </div>
               )}
@@ -162,7 +170,7 @@ function DashboardPage() {
           </section>
 
           <div className="space-y-6">
-            <section className="rounded-2xl border border-border bg-card p-5 shadow-card">
+            <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-card">
               <h2 className="font-semibold">Upcoming</h2>
               {upcomingTasks.length > 0 ? (
                 <ul className="mt-3 space-y-3">
@@ -180,7 +188,7 @@ function DashboardPage() {
               )}
             </section>
 
-            <section className="rounded-2xl border border-border bg-card p-5 shadow-card">
+            <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-card">
               <h2 className="font-semibold">Recent activity</h2>
               {analytics?.recentEvents && analytics.recentEvents.length > 0 ? (
                 <ul className="mt-3 space-y-3">

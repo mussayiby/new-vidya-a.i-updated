@@ -20,6 +20,7 @@ import { Route as AppDashboardRouteImport } from './routes/app.dashboard'
 import { Route as AppProfileRouteImport } from './routes/app.profile'
 import { Route as AppProgressRouteImport } from './routes/app.progress'
 import { Route as AppTutorRouteImport } from './routes/app.tutor'
+import { Route as AppVideoClassroomRouteImport } from './routes/app.video-classroom'
 import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 import { Route as AuthUpdatePasswordRouteImport } from './routes/auth.update-password'
 import { Route as OnboardingClassRouteImport } from './routes/onboarding/class'
@@ -92,6 +93,11 @@ const AppProgressRoute = AppProgressRouteImport.update({
 const AppTutorRoute = AppTutorRouteImport.update({
   id: '/app/tutor',
   path: '/app/tutor',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppVideoClassroomRoute = AppVideoClassroomRouteImport.update({
+  id: '/app/video-classroom',
+  path: '/app/video-classroom',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthCallbackRoute = AuthCallbackRouteImport.update({
@@ -198,6 +204,7 @@ export interface FileRoutesByFullPath {
   '/app/profile': typeof AppProfileRoute
   '/app/progress': typeof AppProgressRoute
   '/app/tutor': typeof AppTutorRoute
+  '/app/video-classroom': typeof AppVideoClassroomRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/update-password': typeof AuthUpdatePasswordRoute
   '/onboarding/class': typeof OnboardingClassRoute
@@ -229,6 +236,7 @@ export interface FileRoutesByTo {
   '/app/profile': typeof AppProfileRoute
   '/app/progress': typeof AppProgressRoute
   '/app/tutor': typeof AppTutorRoute
+  '/app/video-classroom': typeof AppVideoClassroomRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/update-password': typeof AuthUpdatePasswordRoute
   '/onboarding/class': typeof OnboardingClassRoute
@@ -261,6 +269,7 @@ export interface FileRoutesById {
   '/app/profile': typeof AppProfileRoute
   '/app/progress': typeof AppProgressRoute
   '/app/tutor': typeof AppTutorRoute
+  '/app/video-classroom': typeof AppVideoClassroomRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/update-password': typeof AuthUpdatePasswordRoute
   '/onboarding/class': typeof OnboardingClassRoute
@@ -294,6 +303,7 @@ export interface FileRouteTypes {
     | '/app/profile'
     | '/app/progress'
     | '/app/tutor'
+    | '/app/video-classroom'
     | '/auth/callback'
     | '/auth/update-password'
     | '/onboarding/class'
@@ -325,6 +335,7 @@ export interface FileRouteTypes {
     | '/app/profile'
     | '/app/progress'
     | '/app/tutor'
+    | '/app/video-classroom'
     | '/auth/callback'
     | '/auth/update-password'
     | '/onboarding/class'
@@ -356,6 +367,7 @@ export interface FileRouteTypes {
     | '/app/profile'
     | '/app/progress'
     | '/app/tutor'
+    | '/app/video-classroom'
     | '/auth/callback'
     | '/auth/update-password'
     | '/onboarding/class'
@@ -388,6 +400,7 @@ export interface RootRouteChildren {
   AppProfileRoute: typeof AppProfileRoute
   AppProgressRoute: typeof AppProgressRoute
   AppTutorRoute: typeof AppTutorRoute
+  AppVideoClassroomRoute: typeof AppVideoClassroomRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthUpdatePasswordRoute: typeof AuthUpdatePasswordRoute
   AppAiTutorLessonIdRoute: typeof AppAiTutorLessonIdRouteWithChildren
@@ -477,6 +490,13 @@ declare module '@tanstack/react-router' {
       path: '/app/tutor'
       fullPath: '/app/tutor'
       preLoaderRoute: typeof AppTutorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app/video-classroom': {
+      id: '/app/video-classroom'
+      path: '/app/video-classroom'
+      fullPath: '/app/video-classroom'
+      preLoaderRoute: typeof AppVideoClassroomRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth/callback': {
@@ -655,6 +675,7 @@ const rootRouteChildren: RootRouteChildren = {
   AppProfileRoute: AppProfileRoute,
   AppProgressRoute: AppProgressRoute,
   AppTutorRoute: AppTutorRoute,
+  AppVideoClassroomRoute: AppVideoClassroomRoute,
   AuthCallbackRoute: AuthCallbackRoute,
   AuthUpdatePasswordRoute: AuthUpdatePasswordRoute,
   AppAiTutorLessonIdRoute: AppAiTutorLessonIdRouteWithChildren,

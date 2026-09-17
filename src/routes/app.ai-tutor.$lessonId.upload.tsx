@@ -429,9 +429,9 @@ function UploadLessonMediaPage() {
                   <div className="mt-1">
                     {getMediaType(selectedFile.type) ===
                     "audio" ? (
-                      <FileAudio className="size-6 text-blue-500" />
+                      <FileAudio className="size-6 text-primary" />
                     ) : (
-                      <FileVideo className="size-6 text-purple-500" />
+                      <FileVideo className="size-6 text-primary" />
                     )}
                   </div>
 
@@ -499,16 +499,16 @@ function UploadLessonMediaPage() {
 
           {/* Uploaded Success */}
           {uploadedFile && (
-            <Card className="border-green-200 bg-green-50 p-6">
+            <Card className="border-success/20 bg-success/10 p-6">
               <div className="flex items-start gap-4">
-                <CheckCircle2 className="mt-1 size-6 text-green-600" />
+                <CheckCircle2 className="mt-1 size-6 text-success" />
 
                 <div>
-                  <h4 className="font-semibold text-green-900">
+                  <h4 className="font-semibold text-success">
                     Upload Complete!
                   </h4>
 
-                  <p className="mt-1 text-sm text-green-700">
+                  <p className="mt-1 text-sm text-success">
                     Your media has been uploaded and
                     processing has started. AI will
                     transcribe, segment, translate, and
@@ -521,11 +521,11 @@ function UploadLessonMediaPage() {
 
           {/* Information Notice */}
           {selectedFile && !uploading && !uploadedFile && (
-            <Card className="border-blue-200 bg-blue-50 p-4">
+            <Card className="border-primary/15 bg-primary-soft p-4">
               <div className="flex gap-3">
-                <AlertCircle className="mt-0.5 size-5 shrink-0 text-blue-600" />
+                <AlertCircle className="mt-0.5 size-5 shrink-0 text-primary" />
 
-                <p className="text-sm text-blue-700">
+                <p className="text-sm text-primary">
                   Click the upload button below to start
                   processing. This may take several minutes
                   depending on your media length.

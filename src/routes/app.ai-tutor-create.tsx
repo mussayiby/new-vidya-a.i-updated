@@ -406,7 +406,7 @@ function CreateAITutorLesson() {
                   }
                   placeholder="e.g. Introduction to Linear Equations"
                   disabled={isSubmitting}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100"
+                  className="w-full rounded-xl border border-input bg-background px-4 py-3 text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:bg-muted"
                 />
               </div>
 
@@ -428,7 +428,7 @@ function CreateAITutorLesson() {
                   rows={4}
                   placeholder="Brief description of the lesson"
                   disabled={isSubmitting}
-                  className="w-full resize-y rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100"
+                  className="w-full resize-y rounded-xl border border-input bg-background px-4 py-3 text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:bg-muted"
                 />
               </div>
 
@@ -450,7 +450,7 @@ function CreateAITutorLesson() {
                       setClassLevel(event.target.value)
                     }
                     disabled={isSubmitting}
-                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100"
+                    className="w-full rounded-xl border border-input bg-background px-4 py-3 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:bg-muted"
                   >
                     <option value="">
                       Select class
@@ -482,7 +482,7 @@ function CreateAITutorLesson() {
                       setSubject(event.target.value)
                     }
                     disabled={isSubmitting}
-                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100"
+                    className="w-full rounded-xl border border-input bg-background px-4 py-3 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:bg-muted"
                   >
                     <option value="">
                       Select subject
@@ -518,7 +518,7 @@ function CreateAITutorLesson() {
                   }
                   placeholder="e.g. Algebra"
                   disabled={isSubmitting}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100"
+                  className="w-full rounded-xl border border-input bg-background px-4 py-3 text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:bg-muted"
                 />
               </div>
 
@@ -540,7 +540,7 @@ function CreateAITutorLesson() {
                   }
                   placeholder="e.g. Solving Linear Equations"
                   disabled={isSubmitting}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100"
+                  className="w-full rounded-xl border border-input bg-background px-4 py-3 text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:bg-muted"
                 />
               </div>
             </div>
@@ -572,7 +572,7 @@ function CreateAITutorLesson() {
                   setTeacherLanguage(event.target.value)
                 }
                 disabled={isSubmitting}
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100"
+                className="w-full rounded-xl border border-input bg-background px-4 py-3 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:bg-muted"
               >
                 {TEACHER_LANGUAGES.map((language) => (
                   <option
@@ -602,7 +602,7 @@ function CreateAITutorLesson() {
               className={`mt-6 flex min-h-64 flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 text-center transition ${
                 isSubmitting
                   ? "cursor-not-allowed border-slate-200 bg-slate-100"
-                  : "cursor-pointer border-slate-300 bg-slate-50 hover:border-indigo-400 hover:bg-indigo-50/40"
+                    : "cursor-pointer border-border bg-muted/30 hover:border-primary/40 hover:bg-primary-soft"
               }`}
             >
               <div className="text-5xl">
@@ -632,7 +632,7 @@ function CreateAITutorLesson() {
               </div>
 
               {mediaFile && (
-                <div className="mt-3 text-sm font-medium text-indigo-600">
+                <div className="mt-3 text-sm font-medium text-primary">
                   {(mediaFile.size / 1024 / 1024).toFixed(2)} MB selected
                 </div>
               )}
@@ -681,12 +681,12 @@ function CreateAITutorLesson() {
           </section>
 
           {/* Student Language */}
-          <section className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-6">
+          <section className="rounded-2xl border border-primary/15 bg-primary-soft/50 p-6">
             <h2 className="text-xl font-semibold text-slate-950">
               Student Language
             </h2>
 
-            <div className="mt-4 rounded-xl border border-indigo-200 bg-white p-5">
+            <div className="mt-4 rounded-xl border border-primary/15 bg-card p-5">
               <div className="flex gap-3">
                 <span className="text-xl">🌐</span>
 
@@ -702,7 +702,7 @@ function CreateAITutorLesson() {
                     preferred mother tongue.
                   </p>
 
-                  <div className="mt-4 rounded-lg bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+                  <div className="mt-4 rounded-lg bg-primary-soft px-4 py-3 text-sm text-primary">
                     <strong>Example:</strong> One student can choose
                     Hindi, another can choose Kannada, and another
                     can choose Telugu for the same lesson.
@@ -713,7 +713,7 @@ function CreateAITutorLesson() {
           </section>
 
           {/* AI Behaviour */}
-          <section className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-6">
+          <section className="rounded-2xl border border-primary/15 bg-primary-soft/50 p-6">
             <h2 className="text-xl font-semibold text-slate-950">
               AI Tutor Behaviour
             </h2>
@@ -802,9 +802,9 @@ function CreateAITutorLesson() {
 
           {/* Upload status */}
           {uploadProgress && (
-            <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-medium text-indigo-700">
+            <div className="rounded-xl border border-primary/15 bg-primary-soft px-4 py-3 text-sm font-medium text-primary">
               <div className="flex items-center gap-3">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-300 border-t-indigo-700" />
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
                 {uploadProgress}
               </div>
             </div>
@@ -814,7 +814,7 @@ function CreateAITutorLesson() {
           {success && (
             <div
               role="status"
-              className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-700"
+              className="rounded-xl border border-success/20 bg-success/10 px-4 py-3 text-sm font-medium text-success"
             >
               ✓ {success}
             </div>
@@ -849,7 +849,7 @@ function CreateAITutorLesson() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="rounded-xl bg-indigo-600 px-7 py-3 font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-xl bg-primary px-7 py-3 font-semibold text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSubmitting
                 ? "Uploading..."

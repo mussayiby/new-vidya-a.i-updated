@@ -91,8 +91,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:title", content: "Vidya A.I. — Learn in your language" },
       {
         property: "og:description",
-        content:
-          "Guided lessons, an AI tutor and progress tracking in the language you think in.",
+        content: "Guided lessons, an AI tutor and progress tracking in the language you think in.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -143,19 +142,21 @@ function AuthGate() {
   const { ready, user } = useApp();
   const location = useLocation();
   const navigate = useNavigate();
-  const requiresAuth = location.pathname.startsWith("/app") || location.pathname.startsWith("/onboarding");
-  const demoLoggedIn =
-    typeof window !== "undefined" &&
-    window.localStorage.getItem("vidya_demo_logged_in") === "true";
+  const requiresAuth =
+    location.pathname.startsWith("/app") || location.pathname.startsWith("/onboarding");
 
   useEffect(() => {
-    if (ready && requiresAuth && !user && !demoLoggedIn) {
+    if (ready && requiresAuth && !user) {
       void navigate({ to: "/login", replace: true });
     }
-  }, [demoLoggedIn, navigate, ready, requiresAuth, user]);
+  }, [navigate, ready, requiresAuth, user]);
 
-  if (requiresAuth && (!ready || (!user && !demoLoggedIn))) {
-    return <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">Loading...</div>;
+  if (requiresAuth && (!ready || !user)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+        Loading...
+      </div>
+    );
   }
 
   return <Outlet />;
