@@ -25,8 +25,27 @@ export type VideoClassroom = {
   status_message: string | null;
   published: boolean;
   knowledge_map: VideoClassroomKnowledgeMap | null;
+  transcript: VideoClassroomTranscriptSegment[];
   created_at: string;
   updated_at: string;
+};
+
+export type VideoClassroomTranscriptSegment = {
+  startTime: number;
+  endTime: number;
+  text: string;
+};
+
+export type VideoClassroomVoiceSegment = VideoClassroomTranscriptSegment & {
+  sourceText: string;
+  translatedText: string;
+  audioUrl: string;
+};
+
+export type VideoClassroomVoiceTranslation = {
+  language: string;
+  status: "preparing" | "ready" | "failed";
+  segments: VideoClassroomVoiceSegment[];
 };
 
 export type VideoClassroomTopic = {
@@ -102,6 +121,7 @@ export type VideoClassroomKnowledgeMap = {
   lessonTitle: string;
   summary: string;
   keyLearningPoints: string[];
+  transcriptSegments: VideoClassroomTranscriptSegment[];
   topics: Array<{
     title: string;
     summary: string;
@@ -139,6 +159,48 @@ export type VideoClassroomDatabase = {
             | "learning_objectives"
           >;
         Update: Partial<VideoClassroom>;
+        Relationships: [];
+      };
+      ai_video_classroom_translations: {
+        Row: {
+          id: string;
+          classroom_id: string;
+          source_language: string;
+          target_language: string;
+          transcript_version: string;
+          status: "preparing" | "ready" | "failed";
+          error_message: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          VideoClassroomDatabase["public"]["Tables"]["ai_video_classroom_translations"]["Row"],
+          "id" | "created_at" | "updated_at"
+        >;
+        Update: Partial<
+          VideoClassroomDatabase["public"]["Tables"]["ai_video_classroom_translations"]["Row"]
+        >;
+        Relationships: [];
+      };
+      ai_video_classroom_translation_segments: {
+        Row: {
+          id: string;
+          translation_id: string;
+          segment_index: number;
+          start_time: number;
+          end_time: number;
+          source_text: string;
+          translated_text: string;
+          audio_path: string;
+          created_at: string;
+        };
+        Insert: Omit<
+          VideoClassroomDatabase["public"]["Tables"]["ai_video_classroom_translation_segments"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: Partial<
+          VideoClassroomDatabase["public"]["Tables"]["ai_video_classroom_translation_segments"]["Row"]
+        >;
         Relationships: [];
       };
       ai_video_classroom_topics: {

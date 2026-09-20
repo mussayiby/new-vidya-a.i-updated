@@ -50,6 +50,8 @@ export const createRealtimeTranslationToken = createServerFn({
 
     const now = Date.now();
 
+    // Gemini Live API browser sessions require an ephemeral token so the API key stays server-side.
+    // The SDK warning about ephemeral token support is informational until the API is stabilized.
     const response = await fetch(
       "https://generativelanguage.googleapis.com/v1beta/auth_tokens",
       {

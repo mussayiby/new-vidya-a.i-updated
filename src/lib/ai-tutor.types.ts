@@ -383,7 +383,7 @@ export interface AITutorRemedialRequest {
 }
 
 export interface AITutorVoiceSettings {
-  provider: "sarvam";
+  provider: "ai4bharat-indic-tts-v1";
 
   language: string;
 

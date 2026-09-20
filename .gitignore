@@ -15,6 +15,13 @@ lerna-debug.log*
 # Dependencies
 node_modules/
 
+# AI4Bharat Indic-TTS environments and checkpoints
+services/indic-tts/.venv/
+services/indic-tts/models/
+*.pth
+*.pt
+*.ckpt
+
 # Build output
 dist/
 dist-ssr/

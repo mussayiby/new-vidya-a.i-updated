@@ -167,15 +167,21 @@ export function useRealtimeTranslation({
         // Mic -> Gemini
         const micCtx = new AudioContext({ sampleRate: 16000 });
         micCtxRef.current = micCtx;
+        await micCtx.audioWorklet.addModule("/worklets/audio-processor.js");
         const micSrc = micCtx.createMediaStreamSource(sourceStream);
-        const processor = micCtx.createScriptProcessor(4096, 1, 1);
+        const processor = new AudioWorkletNode(micCtx, "vidya-audio-processor", {
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          channelCount: 1,
+          outputChannelCount: [1],
+        });
         micSrc.connect(processor);
         processor.connect(micCtx.destination);
 
-        processor.onaudioprocess = (e) => {
+        processor.port.onmessage = (event: MessageEvent<Float32Array>) => {
           if (cancelled ||!sessionRef.current) return;
 
-          const input = e.inputBuffer.getChannelData(0);
+          const input = event.data;
           if (!input) return;
 
           const pcm = new Uint8Array(input.length * 2);

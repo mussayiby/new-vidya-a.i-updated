@@ -201,7 +201,6 @@ function WatchClassPage({ liveClass }: { liveClass: LiveClass }) {
                 {translation.status === "live" ? "Translated live" : "Enable live translation"}
               </Button>
             </div>
-            <audio ref={translation.audioRef} autoPlay playsInline />
             {translation.error && (
               <p className="mt-3 text-sm text-destructive">{translation.error}</p>
             )}

@@ -522,13 +522,11 @@ export const startAITutorProcessing =
       }
 
       /*
-       * The next backend step will replace this section with:
+       * The real backend flow is:
        *
        * lesson
        *   ↓
        * original video
-       *   ↓
-       * Sarvam transcription
        *   ↓
        * Gemini lesson analysis
        *   ↓
@@ -538,9 +536,9 @@ export const startAITutorProcessing =
        *   ↓
        * translation
        *   ↓
-       * natural female AI voice
+       * local AI4Bharat Indic-TTS voice synthesis
        *   ↓
-       * translated video
+       * translated classroom audio
        *   ↓
        * ready
        */

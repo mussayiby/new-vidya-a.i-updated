@@ -29,7 +29,7 @@ function sendSignal(
   event: string,
   payload: SignalPayload,
 ) {
-  void channel.send({
+  void channel.httpSend({
     type: "broadcast",
     event,
     payload,

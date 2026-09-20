@@ -16,6 +16,8 @@ import {
   Sparkles,
   Upload,
   Video,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
@@ -33,6 +35,7 @@ import {
   getVideoClassroom,
   joinVideoClassroom,
   listMyVideoClassrooms,
+  prepareVideoClassroomVoice,
   processVideoClassroom,
   publishVideoClassroom,
   saveVideoClassroomProgress,
@@ -42,6 +45,7 @@ import type {
   VideoClassroomAttempt,
   VideoClassroomCheckpoint,
   VideoClassroomDatabase,
+  VideoClassroomVoiceTranslation,
 } from "@/lib/video-classroom.types";
 import { classLevels, languages, learningStyles } from "@/data/catalog";
 
@@ -60,6 +64,7 @@ const classroomDb =
 const STORAGE_BUCKET = "ai-video-classrooms";
 const MAX_VIDEO_SIZE = 500 * 1024 * 1024;
 const VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"] as const;
+const VOICE_LANGUAGES = ["en", "bn", "gu", "hi", "kn", "ml", "mr", "ta", "te"] as const;
 
 type Mode = "home" | "create" | "join" | "manage" | "learn";
 
@@ -75,6 +80,7 @@ function VideoClassroomPage() {
   const { user, profile } = useApp();
   const [mode, setMode] = useState<Mode>("home");
   const [selectedClassroom, setSelectedClassroom] = useState<ClassroomPayload | null>(null);
+  const [selectedLanguage, setSelectedLanguage] = useState<string | undefined>();
   const [message, setMessage] = useState<string | null>(null);
 
   if (!user) {
@@ -93,11 +99,12 @@ function VideoClassroomPage() {
     );
   }
 
-  const openClassroom = async (classroom: VideoClassroom) => {
+  const openClassroom = async (classroom: VideoClassroom, initialLanguage = profile.language) => {
     try {
       const session = await supabase.auth.getSession();
       const accessToken = session.data.session?.access_token;
       if (!accessToken) throw new Error("Your session expired. Please sign in again.");
+      setSelectedLanguage(initialLanguage);
       setSelectedClassroom(
         await getVideoClassroom({ data: { accessToken, classroomId: classroom.id } }),
       );
@@ -121,7 +128,7 @@ function VideoClassroomPage() {
         {mode === "join" ? (
           <JoinClassroom
             onBack={() => setMode("home")}
-            onJoined={(classroom) => void openClassroom(classroom)}
+            onJoined={(classroom, language) => void openClassroom(classroom, language)}
             setMessage={setMessage}
           />
         ) : null}
@@ -137,6 +144,7 @@ function VideoClassroomPage() {
             data={selectedClassroom}
             userId={user.id}
             profile={profile}
+            initialLanguage={selectedLanguage}
             onBack={() => setMode("home")}
             setMessage={setMessage}
           />
@@ -532,7 +540,7 @@ function JoinClassroom({
   setMessage,
 }: {
   onBack: () => void;
-  onJoined: (classroom: VideoClassroom) => void;
+  onJoined: (classroom: VideoClassroom, language: string) => void;
   setMessage: (message: string | null) => void;
 }) {
   const [code, setCode] = useState("");
@@ -551,7 +559,7 @@ function JoinClassroom({
       const classroom = await joinVideoClassroom({
         data: { accessToken, code, language, learningStyle, learningPreference: preference },
       });
-      onJoined(classroom);
+      onJoined(classroom, language);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not join this classroom.");
     } finally {
@@ -625,12 +633,14 @@ function ClassroomPlayer({
   data,
   userId,
   profile,
+  initialLanguage,
   onBack,
   setMessage,
 }: {
   data: ClassroomPayload;
   userId: string;
   profile: ReturnType<typeof import("@/hooks/useApp").useApp>["profile"];
+  initialLanguage?: string | undefined;
   onBack: () => void;
   setMessage: (message: string | null) => void;
 }) {
@@ -642,12 +652,235 @@ function ClassroomPlayer({
   const [evaluating, setEvaluating] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [publishing, setPublishing] = useState(false);
-  const handledCheckpoints = useRef(new Set<string>());
+  const originalLanguage =
+    classroomData.classroom.teacher_language.split("-")[0]?.toLowerCase() ?? "en";
+  const [voiceLanguage, setVoiceLanguage] = useState(
+    initialLanguage && initialLanguage !== originalLanguage ? initialLanguage : "original",
+  );
+  const [voiceTranslation, setVoiceTranslation] = useState<VideoClassroomVoiceTranslation | null>(
+    null,
+  );
+  const [voiceStatus, setVoiceStatus] = useState<"idle" | "preparing" | "ready" | "failed">("idle");
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const voiceRef = useRef<VideoClassroomVoiceTranslation | null>(null);
+  const audioSegmentRef = useRef(-1);
+  const completedTopics = useRef(new Set<string>());
+  const audioGenerationRef = useRef(0);
+  const audioPlayPromiseRef = useRef<Promise<void> | null>(null);
+  const voiceRequestRef = useRef(0);
+  const previousVideoTimeRef = useRef(0);
   const lastSavedAt = useRef(0);
   const checkpoints = useMemo(
     () => [...classroomData.checkpoints].sort((a, b) => a.timestamp_seconds - b.timestamp_seconds),
     [classroomData.checkpoints],
   );
+
+  const stopTranslatedAudio = () => {
+    audioGenerationRef.current += 1;
+    audioPlayPromiseRef.current = null;
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.onloadedmetadata = null;
+    audioSegmentRef.current = -1;
+  };
+
+  const playTranslatedAudio = (
+    audio: HTMLAudioElement,
+    segmentIndex: number,
+    audioUrl: string,
+  ) => {
+    if (audioPlayPromiseRef.current || !audio.paused) return;
+
+    const generation = audioGenerationRef.current;
+    const playPromise = audio.play();
+    audioPlayPromiseRef.current = playPromise;
+
+    void playPromise
+      .then(() => {
+        if (audioPlayPromiseRef.current !== playPromise) return;
+        audioPlayPromiseRef.current = null;
+        if (
+          generation !== audioGenerationRef.current ||
+          audioSegmentRef.current !== segmentIndex ||
+          audio.src !== audioUrl
+        ) {
+          return;
+        }
+        console.info("[Video Classroom Voice] audio playback started", {
+          segmentIndex,
+          audioUrl,
+        });
+      })
+      .catch((error: unknown) => {
+        if (audioPlayPromiseRef.current === playPromise) {
+          audioPlayPromiseRef.current = null;
+        }
+        const isExpectedInterruption =
+          error instanceof DOMException && error.name === "AbortError";
+        const isStaleRequest =
+          generation !== audioGenerationRef.current ||
+          audioSegmentRef.current !== segmentIndex ||
+          audio.src !== audioUrl;
+        if (isExpectedInterruption || isStaleRequest) return;
+        console.error("[Video Classroom Voice] audio playback failed", {
+          segmentIndex,
+          audioUrl,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+  };
+
+  const syncTranslatedAudio = (position: number, shouldPlay: boolean, forceSeek = false) => {
+    const audio = audioRef.current;
+    const translation = voiceRef.current;
+    if (!audio || !translation?.segments.length) {
+      console.info("[Video Classroom Voice] audio URL loaded", {
+        hasAudio: Boolean(audio),
+        segmentCount: translation?.segments.length ?? 0,
+        position,
+      });
+      stopTranslatedAudio();
+      return;
+    }
+    const segmentIndex = translation.segments.findIndex(
+      (segment) => position >= segment.startTime && position < segment.endTime,
+    );
+    if (segmentIndex < 0) {
+      stopTranslatedAudio();
+      return;
+    }
+    const segment = translation.segments[segmentIndex];
+    if (!segment) return;
+    const offset = Math.max(0, position - segment.startTime);
+    if (audioSegmentRef.current !== segmentIndex || audio.src !== segment.audioUrl) {
+      const generation = ++audioGenerationRef.current;
+      console.info("[Video Classroom Voice] audio load started", {
+        segmentIndex,
+        audioUrl: segment.audioUrl,
+        position,
+        shouldPlay,
+      });
+      audio.pause();
+      audioPlayPromiseRef.current = null;
+      audio.onloadedmetadata = null;
+      audio.removeAttribute("src");
+      audio.load();
+      audio.src = segment.audioUrl;
+      audio.preload = "auto";
+      audioSegmentRef.current = segmentIndex;
+      audio.onerror = () => {
+        console.error("[Video Classroom Voice] audio error", {
+          segmentIndex,
+          audioUrl: segment.audioUrl,
+          src: audio.src,
+        });
+      };
+      audio.onloadedmetadata = () => {
+        if (generation !== audioGenerationRef.current || audioSegmentRef.current !== segmentIndex) {
+          return;
+        }
+        console.info("[Video Classroom Voice] audio can play", {
+          segmentIndex,
+          audioUrl: segment.audioUrl,
+          duration: audio.duration,
+          offset,
+        });
+        audio.currentTime = offset;
+        const segmentDuration = segment.endTime - segment.startTime;
+        if (Number.isFinite(audio.duration) && segmentDuration > 0) {
+          audio.playbackRate = Math.min(2, Math.max(0.75, audio.duration / segmentDuration));
+        }
+        if (shouldPlay) {
+          playTranslatedAudio(audio, segmentIndex, segment.audioUrl);
+        }
+      };
+      audio.load();
+    } else if (forceSeek) {
+      audio.currentTime = offset;
+      if (shouldPlay) {
+        playTranslatedAudio(audio, segmentIndex, segment.audioUrl);
+      }
+    } else if (shouldPlay && audio.paused) {
+      playTranslatedAudio(audio, segmentIndex, segment.audioUrl);
+    }
+  };
+
+  const prepareVoice = async (language: string) => {
+    if (voiceStatus === "preparing") {
+      console.info("[Video Classroom Voice Client] skipping duplicate prepare request", {
+        language,
+        classroomId: classroomData.classroom.id,
+        voiceStatus,
+      });
+      return;
+    }
+
+    const requestId = ++voiceRequestRef.current;
+    stopTranslatedAudio();
+    if (language === "original" || language === originalLanguage) {
+      voiceRef.current = null;
+      setVoiceTranslation(null);
+      setVoiceStatus("idle");
+      setVoiceError(null);
+      if (videoRef.current) videoRef.current.muted = false;
+      return;
+    }
+    console.info("[Video Classroom Voice Client] preparation started", {
+      requestId,
+      classroomId: classroomData.classroom.id,
+      language,
+    });
+    setVoiceStatus("preparing");
+    setVoiceError(null);
+    if (videoRef.current) videoRef.current.muted = true;
+    try {
+      const session = await supabase.auth.getSession();
+      const accessToken = session.data.session?.access_token;
+      if (!accessToken) throw new Error("Your session expired. Please sign in again.");
+      console.info("[Video Classroom Voice Client] request sent", { requestId, language });
+      const translation = await prepareVideoClassroomVoice({
+        data: {
+          accessToken,
+          classroomId: classroomData.classroom.id,
+          language: language as (typeof VOICE_LANGUAGES)[number],
+        },
+      });
+      console.info("[Video Classroom Voice Client] response received", { requestId });
+      console.info("[Video Classroom Voice Client] status:", translation.status);
+      console.info("[Video Classroom Voice Client] segment count:", translation.segments.length);
+      console.info(
+        "[Video Classroom Voice Client] audio URL count:",
+        translation.segments.filter((segment) => Boolean(segment.audioUrl)).length,
+      );
+      if (requestId !== voiceRequestRef.current) return;
+      voiceRef.current = translation;
+      setVoiceTranslation(translation);
+      setVoiceStatus("ready");
+      syncTranslatedAudio(
+        videoRef.current?.currentTime ?? 0,
+        Boolean(videoRef.current && !videoRef.current.paused),
+      );
+    } catch (error) {
+      console.error("[Video Classroom Voice Client] preparation failed:", error);
+      if (requestId !== voiceRequestRef.current) return;
+      voiceRef.current = null;
+      setVoiceTranslation(null);
+      setVoiceStatus("failed");
+      setVoiceError(error instanceof Error ? error.message : "Translated teacher voice failed.");
+      if (videoRef.current) videoRef.current.muted = false;
+    }
+  };
+
+  const prepareVoiceRef = useRef(prepareVoice);
+  prepareVoiceRef.current = prepareVoice;
+
+  useEffect(() => {
+    void prepareVoiceRef.current(voiceLanguage);
+    const audio = audioRef.current;
+    return () => stopTranslatedAudio();
+  }, [voiceLanguage, classroomData.classroom.id]);
 
   const speech = useSpeechRecognition({
     lang: profile.language === "en" ? "en-US" : `${profile.language}-IN`,
@@ -685,19 +918,29 @@ function ClassroomPlayer({
   const onTimeUpdate = () => {
     const video = videoRef.current;
     if (!video) return;
-    const next = checkpoints.find(
-      (checkpoint) =>
-        !handledCheckpoints.current.has(checkpoint.id) &&
-        video.currentTime >= checkpoint.timestamp_seconds,
+    const previousTime = previousVideoTimeRef.current;
+    previousVideoTimeRef.current = video.currentTime;
+    const boundaryTopic = classroomData.topics.find(
+      (topic) =>
+        !completedTopics.current.has(topic.id) &&
+        previousTime < topic.end_time - 0.05 &&
+        video.currentTime >= topic.end_time - 0.05,
     );
-    if (next) {
-      handledCheckpoints.current.add(next.id);
+    if (boundaryTopic) {
+      completedTopics.current.add(boundaryTopic.id);
       video.pause();
-      setActiveCheckpoint(next);
+      stopTranslatedAudio();
+      const checkpoint = checkpoints.find((item) => item.topic_id === boundaryTopic.id) ?? null;
+      setActiveCheckpoint(checkpoint);
       setAttempt(null);
       setAnswer("");
-      void persistPosition(video.currentTime);
-    } else void persistPosition(video.currentTime);
+      void persistPosition(boundaryTopic.end_time, checkpoint === null);
+      return;
+    }
+    if (voiceLanguage !== "original" && voiceStatus === "ready") {
+      syncTranslatedAudio(video.currentTime, !video.paused);
+    }
+    void persistPosition(video.currentTime, false);
   };
 
   const evaluate = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -727,10 +970,23 @@ function ClassroomPlayer({
   };
 
   const continueLesson = () => {
+    const currentTopic = activeCheckpoint
+      ? classroomData.topics.find((topic) => topic.id === activeCheckpoint.topic_id)
+      : null;
+    const nextTopic = currentTopic
+      ? classroomData.topics.find((topic) => topic.start_time >= currentTopic.end_time)
+      : null;
     setActiveCheckpoint(null);
     setAttempt(null);
     setAnswer("");
-    videoRef.current?.play().catch(() => undefined);
+    const video = videoRef.current;
+    if (!video) return;
+    if (nextTopic) {
+      video.currentTime = nextTopic.start_time;
+    } else {
+      void persistPosition(video.duration || video.currentTime, true);
+    }
+    video.play().catch(() => undefined);
   };
 
   const refreshClassroom = async () => {
@@ -845,8 +1101,28 @@ function ClassroomPlayer({
                 controls
                 playsInline
                 onTimeUpdate={onTimeUpdate}
-                onPause={() => void persistPosition(videoRef.current?.currentTime ?? 0)}
-                onEnded={() => void persistPosition(videoRef.current?.currentTime ?? 0, true)}
+                onPlay={() => syncTranslatedAudio(videoRef.current?.currentTime ?? 0, true)}
+                onPause={() => {
+                  stopTranslatedAudio();
+                  void persistPosition(videoRef.current?.currentTime ?? 0);
+                }}
+                onSeeking={() => {
+                  previousVideoTimeRef.current = videoRef.current?.currentTime ?? 0;
+                  stopTranslatedAudio();
+                }}
+                onSeeked={() => {
+                  const position = videoRef.current?.currentTime ?? 0;
+                  previousVideoTimeRef.current = position;
+                  syncTranslatedAudio(
+                    position,
+                    Boolean(videoRef.current && !videoRef.current.paused),
+                    true,
+                  );
+                }}
+                onEnded={() => {
+                  stopTranslatedAudio();
+                  void persistPosition(videoRef.current?.currentTime ?? 0, true);
+                }}
                 src={classroomData.videoUrl}
               />
             ) : (
@@ -854,6 +1130,66 @@ function ClassroomPlayer({
                 Lesson video is not available.
               </div>
             )}
+          </div>
+          <audio ref={audioRef} className="hidden" aria-hidden="true" />
+          <div className="flex flex-wrap items-center gap-3 border-t p-4">
+            <label
+              className="flex items-center gap-2 text-sm font-semibold"
+              htmlFor="teacher-voice-language"
+            >
+              {voiceLanguage === "original" ? (
+                <Volume2 className="size-4 text-primary" />
+              ) : (
+                <VolumeX className="size-4 text-primary" />
+              )}
+              Teacher voice
+            </label>
+            <select
+              id="teacher-voice-language"
+              value={voiceLanguage}
+              onChange={(event) =>
+                setVoiceLanguage(
+                  event.target.value === originalLanguage ? "original" : event.target.value,
+                )
+              }
+              disabled={voiceStatus === "preparing"}
+              className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
+            >
+              <option value="original">
+                Original ({classroomData.classroom.teacher_language})
+              </option>
+              {languages
+                .filter(
+                  (language) =>
+                    VOICE_LANGUAGES.includes(language.id as (typeof VOICE_LANGUAGES)[number]) ||
+                    language.id === "ur",
+                )
+                .map((language) => (
+                  <option key={language.id} value={language.id} disabled={language.id === "ur"}>
+                    {language.label} · {language.native}
+                    {language.id === "ur" ? " (voice unavailable)" : ""}
+                  </option>
+                ))}
+            </select>
+            {voiceStatus === "preparing" ? (
+              <span className="text-sm text-muted-foreground">
+                Preparing {voiceLanguage} teacher voice...
+              </span>
+            ) : null}
+            {voiceStatus === "failed" ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void prepareVoice(voiceLanguage)}
+              >
+                Retry {voiceLanguage} voice
+              </Button>
+            ) : null}
+            {voiceError ? <span className="text-sm text-destructive">{voiceError}</span> : null}
+            {voiceStatus === "ready" && voiceTranslation ? (
+              <span className="text-sm text-muted-foreground">Translated teacher voice ready</span>
+            ) : null}
           </div>
           <div className="border-t p-4">
             <div className="flex items-center justify-between text-sm">

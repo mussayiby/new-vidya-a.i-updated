@@ -91,8 +91,8 @@ function LessonDetailPage() {
 
   const loadLesson = async () => {
     try {
-      const data = await getAILesson({ lessonId });
-      setLesson(data);
+      const data = await getAILesson({ data: { lessonId } });
+      setLesson({ ...data, error_message: null });
     } catch (error) {
       if (loading) {
         toast.error(error instanceof Error ? error.message : "Failed to load lesson");
@@ -107,7 +107,7 @@ function LessonDetailPage() {
 
     setPublishing(true);
     try {
-      await publishAILesson({ lessonId, publish: !lesson.published });
+      await publishAILesson({ data: { lessonId, publish: !lesson.published } });
       await loadLesson();
       toast.success(lesson.published ? "Lesson unpublished" : "Lesson published!");
     } catch (error) {
