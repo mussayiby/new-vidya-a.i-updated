@@ -1,8 +1,13 @@
 import { createServerFn } from "@tanstack/react-start";
-import { GoogleGenAI } from "@google/genai";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import {
+  createGeminiClient,
+  getAvailableGeminiVideoModels,
+  getGeminiApiKey,
+  getGeminiVideoModelCandidates,
+} from "@/lib/gemini.server";
 import type {
   VideoClassroom,
   VideoClassroomCheckpoint,
@@ -13,20 +18,23 @@ import type {
   VideoClassroomTopic,
 } from "@/lib/video-classroom.types";
 import { createIndicTtsProvider } from "@/lib/tts/indic-tts.provider";
+import { translateTranscriptWithBharat4U } from "@/lib/bharat4u-translation.provider";
 
 const db = supabaseAdmin as unknown as SupabaseClient<VideoClassroomDatabase>;
 
 const STORAGE_BUCKET = "ai-video-classrooms";
 const voicePreparationLocks = new Map<string, Promise<VideoClassroomVoiceTranslation>>();
+const GEMINI_VIDEO_MODEL_CANDIDATES = getGeminiVideoModelCandidates();
 
 const GENERATE_CONTENT_TIMEOUT_MS = 3 * 60 * 1000;
-const GENERATE_CONTENT_MAX_ATTEMPTS = 5;
-const GENERATE_CONTENT_RETRY_DELAYS_MS = [
-  5_000,
-  10_000,
-  20_000,
-  40_000,
-  60_000,
+const GEMINI_VIDEO_PRIMARY_MODEL = "gemini-3.5-flash-lite";
+const GEMINI_VIDEO_FALLBACK_MODEL = "gemini-3.5-flash";
+const GENERATE_CONTENT_RETRY_DELAY_MS = 3_000;
+const TRANSLATION_MAX_ATTEMPTS = 4;
+const TRANSLATION_RETRY_DELAYS_MS = [
+  1_000,
+  2_000,
+  4_000,
 ] as const;
 
 const accessTokenSchema = z.string().trim().min(20).max(4096);
@@ -128,13 +136,6 @@ const LANGUAGE_NAMES: Record<string, string> = {
   ta: "Tamil",
   te: "Telugu",
 };
-
-function getGeminiApiKey(): string | undefined {
-  return (
-    process.env["GEMINI_API_KEY"]?.trim() ||
-    process.env["AI_API_KEY"]?.trim()
-  );
-}
 
 async function getUser(accessToken: string) {
   const { data, error } = await supabaseAdmin.auth.getUser(accessToken);
@@ -302,46 +303,150 @@ async function generateContentWithTimeout<T>(
   }
 }
 
-function isTransientGenerateContentError(error: unknown): boolean {
+function providerErrorStatus(error: unknown): string {
   const details =
     error && typeof error === "object"
       ? (error as {
           status?: unknown;
           statusCode?: unknown;
           code?: unknown;
+          error?: {
+            status?: unknown;
+            statusCode?: unknown;
+            code?: unknown;
+          };
         })
       : {};
+  const nested = details.error;
 
-  const status =
+  return (
     typeof details.status === "number" ||
     typeof details.status === "string"
       ? String(details.status).toLowerCase()
       : typeof details.statusCode === "number" ||
           typeof details.statusCode === "string"
         ? String(details.statusCode).toLowerCase()
-        : "";
+        : typeof nested?.status === "number" ||
+            typeof nested?.status === "string"
+          ? String(nested.status).toLowerCase()
+          : typeof nested?.statusCode === "number" ||
+              typeof nested?.statusCode === "string"
+            ? String(nested.statusCode).toLowerCase()
+        : ""
+  );
+}
 
-  const code =
-    typeof details.code === "string"
-      ? details.code.toLowerCase()
-      : "";
+function providerErrorText(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message.toLowerCase();
+  }
 
-  const message =
-    error instanceof Error
-      ? error.message.toLowerCase()
-      : "";
+  return JSON.stringify(error).toLowerCase();
+}
+
+function providerErrorCode(error: unknown): string {
+  const details =
+    error && typeof error === "object"
+      ? (error as { code?: unknown; error?: { code?: unknown } })
+      : {};
+  const code = details.code ?? details.error?.code;
+
+  return typeof code === "string"
+    ? code.toLowerCase()
+    : "";
+}
+
+function isDailyGenerateQuotaError(error: unknown): boolean {
+  const text = providerErrorText(error);
 
   return (
-    ["429", "500", "502", "503", "504", "unavailable"].includes(status) ||
-    code.includes("unavailable") ||
-    code.includes("resource_exhausted") ||
-    code.includes("internal") ||
-    message.includes("high demand") ||
-    message.includes("temporarily unavailable") ||
-    message.includes("service unavailable") ||
-    message.includes("internal server error") ||
-    message.includes("temporary server error")
+    text.includes("generaterequestsperday") ||
+    text.includes("quotaid") && text.includes("generate_requests_per_day")
   );
+}
+
+function isTransientGenerateContentError(error: unknown): boolean {
+  const status = providerErrorStatus(error);
+  const code = providerErrorCode(error);
+  const text = providerErrorText(error);
+
+  return (
+    !isDailyGenerateQuotaError(error) &&
+    (["500", "502", "503", "504"].includes(status) ||
+      status === "unavailable" ||
+      code.includes("unavailable") ||
+      text.includes("high demand") ||
+      text.includes("temporarily unavailable") ||
+      text.includes("service unavailable"))
+  );
+}
+
+function isGenerateContentTimeoutError(error: unknown): boolean {
+  return providerErrorText(error).includes("timed out");
+}
+
+function isModelNotAvailableError(error: unknown): boolean {
+  const status = providerErrorStatus(error);
+  const code = providerErrorCode(error);
+  const text = providerErrorText(error);
+
+  return (
+    status === "404" ||
+    code.includes("notfound") ||
+    code.includes("model_not_found") ||
+    text.includes("model not found") ||
+    text.includes("not found") && text.includes("model")
+  );
+}
+
+function generateContentRetryAfterMs(error: unknown): number | undefined {
+  const details =
+    error && typeof error === "object"
+      ? (error as {
+          retryAfter?: unknown;
+          retry_after?: unknown;
+          headers?: unknown;
+          error?: {
+            retryAfter?: unknown;
+            retry_after?: unknown;
+            headers?: unknown;
+          };
+        })
+      : {};
+  const nested = details.error;
+  const headers = details.headers;
+  const headerValue =
+    headers &&
+    typeof headers === "object" &&
+    "get" in headers &&
+    typeof headers.get === "function"
+      ? headers.get("retry-after")
+      : headers && typeof headers === "object"
+        ? (headers as Record<string, unknown>)["retry-after"] ??
+          (headers as Record<string, unknown>)["Retry-After"]
+        : undefined;
+  const value =
+    details.retryAfter ??
+    details.retry_after ??
+    nested?.retryAfter ??
+    nested?.retry_after ??
+    headerValue;
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.min(30_000, Math.max(0, value * 1_000));
+  }
+
+  if (typeof value !== "string") return undefined;
+
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) {
+    return Math.min(30_000, Math.max(0, seconds * 1_000));
+  }
+
+  const retryAt = Date.parse(value);
+  return Number.isNaN(retryAt)
+    ? undefined
+    : Math.min(30_000, Math.max(0, retryAt - Date.now()));
 }
 
 function transientErrorLabel(error: unknown): string {
@@ -354,19 +459,9 @@ function transientErrorLabel(error: unknown): string {
         })
       : {};
 
-  const status =
-    typeof details.status === "number" ||
-    typeof details.status === "string"
-      ? String(details.status)
-      : typeof details.statusCode === "number" ||
-          typeof details.statusCode === "string"
-        ? String(details.statusCode)
-        : "";
+  const status = providerErrorStatus(error);
 
-  const code =
-    typeof details.code === "string"
-      ? details.code
-      : "";
+  const code = typeof details.code === "string" ? details.code : "";
 
   return [
     status,
@@ -377,61 +472,95 @@ function transientErrorLabel(error: unknown): string {
 }
 
 async function generateContentWithRetry<T>(
-  requestFactory: () => Promise<T>,
-): Promise<T> {
-  for (
-    let attempt = 1;
-    attempt <= GENERATE_CONTENT_MAX_ATTEMPTS;
-    attempt += 1
-  ) {
-    try {
-      return await generateContentWithTimeout(requestFactory);
-    } catch (error) {
-      const isLastAttempt =
-        attempt === GENERATE_CONTENT_MAX_ATTEMPTS;
+  requestFactory: (modelName: string) => Promise<T>,
+  modelCandidates: readonly string[] = GEMINI_VIDEO_MODEL_CANDIDATES,
+): Promise<{ response: T; modelName: string }> {
+  const fallbackModels = [
+    GEMINI_VIDEO_PRIMARY_MODEL,
+    GEMINI_VIDEO_FALLBACK_MODEL,
+  ].filter((modelName) => modelCandidates.includes(modelName));
+  const modelsToTry =
+    fallbackModels.length > 0
+      ? fallbackModels
+      : [GEMINI_VIDEO_PRIMARY_MODEL, GEMINI_VIDEO_FALLBACK_MODEL];
 
-      if (
-        isLastAttempt ||
-        !isTransientGenerateContentError(error)
-      ) {
-        console.error(
-          `[Gemini Video] generateContent failed after ${attempt} attempt${
-            attempt === 1 ? "" : "s"
-          }.`,
+  let lastError: unknown;
+
+  for (let modelIndex = 0; modelIndex < modelsToTry.length; modelIndex += 1) {
+    const modelName = modelsToTry[modelIndex]!;
+    const isPrimaryModel = modelName === GEMINI_VIDEO_PRIMARY_MODEL;
+    let attempt = 1;
+
+    while (true) {
+      console.info(`[Gemini Video] model=${modelName}`);
+      console.info(`[Gemini Video] attempt=${attempt}`);
+
+      try {
+        const response = await generateContentWithTimeout(() => requestFactory(modelName));
+        console.info(`[Gemini Video] Model ${modelName} succeeded.`);
+        return { response, modelName };
+      } catch (error) {
+        lastError = error;
+
+        if (isModelNotAvailableError(error)) {
+          console.warn(
+            `[Gemini Video] Model ${modelName} is unavailable (404/model not found).`,
+          );
+          throw error;
+        }
+
+        const hasNextModel = modelIndex < modelsToTry.length - 1;
+
+        if (isGenerateContentTimeoutError(error) && hasNextModel) {
+          console.info(
+            `[Gemini Video] fallback=${modelsToTry[modelIndex + 1]}`,
+          );
+          break;
+        }
+
+        if (!isTransientGenerateContentError(error)) {
+          console.error(
+            `[Gemini Video] Non-retryable generateContent error for ${modelName}: ${safeErrorDetailsForLog(error)}`,
+          );
+          throw error;
+        }
+
+        console.warn(
+          `[Gemini Video] Model ${modelName} returned ${transientErrorLabel(error)}.`,
         );
 
+        const canRetryPrimary503 =
+          isPrimaryModel &&
+          providerErrorStatus(error) === "503" &&
+          attempt === 1;
+
+        if (canRetryPrimary503) {
+          console.info(
+            `[Gemini Video] retrying ${modelName} once after transient 503`,
+          );
+          await new Promise((resolve) =>
+            setTimeout(resolve, GENERATE_CONTENT_RETRY_DELAY_MS),
+          );
+          attempt += 1;
+          continue;
+        }
+
+        if (modelIndex < modelsToTry.length - 1) {
+          console.info(
+            `[Gemini Video] fallback=${modelsToTry[modelIndex + 1]}`,
+          );
+          break;
+        }
+
+        console.error(
+          `[Gemini Video] generateContent failed on ${modelName}.`,
+        );
         throw error;
       }
-
-      const baseDelay =
-        GENERATE_CONTENT_RETRY_DELAYS_MS[attempt - 1] ??
-        60_000;
-
-      const jitter = Math.floor(
-        Math.random() *
-          Math.min(2_000, baseDelay * 0.2),
-      );
-
-      const delay = Math.min(
-        60_000,
-        baseDelay + jitter,
-      );
-
-      console.warn(
-        `[Gemini Video] generateContent transient error (${transientErrorLabel(
-          error,
-        )}). Retrying ${attempt}/${GENERATE_CONTENT_MAX_ATTEMPTS} in ${Math.ceil(
-          delay / 1_000,
-        )}s...`,
-      );
-
-      await new Promise((resolve) =>
-        setTimeout(resolve, delay),
-      );
     }
   }
 
-  throw new Error(
+  throw lastError ?? new Error(
     "Gemini generateContent retry loop exited unexpectedly.",
   );
 }
@@ -442,25 +571,18 @@ function describeProcessingError(error: unknown): string {
       ? error.message
       : "Unknown processing error";
 
-  const details =
-    error && typeof error === "object"
-      ? (error as {
-          status?: unknown;
-          statusCode?: unknown;
-        })
-      : {};
-
-  const status =
-    typeof details.status === "number"
-      ? details.status
-      : typeof details.statusCode === "number"
-        ? details.statusCode
-        : null;
+  const status = providerErrorStatus(error);
 
   const lowerMessage = message.toLowerCase();
 
   if (
-    status === 429 ||
+    isDailyGenerateQuotaError(error)
+  ) {
+    return "Gemini's daily video analysis quota is exhausted for this project. Please try again tomorrow or use a project with available quota.";
+  }
+
+  if (
+    status === "429" ||
     lowerMessage.includes("quota") ||
     lowerMessage.includes("rate limit")
   ) {
@@ -468,8 +590,8 @@ function describeProcessingError(error: unknown): string {
   }
 
   if (
-    status === 401 ||
-    status === 403 ||
+    status === "401" ||
+    status === "403" ||
     lowerMessage.includes("api key") ||
     lowerMessage.includes("unauthorized")
   ) {
@@ -477,7 +599,7 @@ function describeProcessingError(error: unknown): string {
   }
 
   if (
-    status === 404 ||
+    status === "404" ||
     lowerMessage.includes("not found") ||
     lowerMessage.includes("no longer available")
   ) {
@@ -485,7 +607,7 @@ function describeProcessingError(error: unknown): string {
   }
 
   if (
-    status === 503 ||
+    status === "503" ||
     lowerMessage.includes("unavailable") ||
     lowerMessage.includes("high demand")
   ) {
@@ -497,7 +619,7 @@ function describeProcessingError(error: unknown): string {
   }
 
   if (
-    status === 400 ||
+    status === "400" ||
     lowerMessage.includes("invalid argument") ||
     lowerMessage.includes("invalid request") ||
     lowerMessage.includes("unsupported")
@@ -608,7 +730,6 @@ const transcriptSegmentSchema = z.object({
   text: z.string().trim().min(1),
 });
 
-/** Translate the complete timestamped transcript in one Gemini request. */
 async function translateVoiceSegments(
   transcript: VideoClassroomTranscriptSegment[],
   from: string,
@@ -618,114 +739,145 @@ async function translateVoiceSegments(
     return transcript.map((segment) => segment.text);
   }
 
-  const apiKey = getGeminiApiKey();
+  console.info(
+    `[Video Classroom Voice] Translating ${transcript.length} segments from ${from} to ${to} via Bharat4U.`,
+  );
 
-  if (!apiKey) {
+  const translated = await translateTranscriptWithBharat4U({
+    transcript: transcript.map((segment, segmentIndex) => ({
+      segmentIndex,
+      startTime: segment.startTime,
+      endTime: segment.endTime,
+      text: segment.text,
+    })),
+    from,
+    to,
+  });
+
+  if (translated.length !== transcript.length) {
     throw new Error(
-      "Gemini is not configured on the server.",
+      `Bharat4U returned ${translated.length} translated segments for ${transcript.length} transcript segments.`,
     );
   }
 
-  const sourceLanguage =
-    LANGUAGE_NAMES[from] ?? from;
-
-  const targetLanguage =
-    LANGUAGE_NAMES[to] ?? to;
-
-  const client = new GoogleGenAI({
-    apiKey,
-  });
-
-  console.info(
-    `[Video Classroom Voice] Translating ${transcript.length} segments from ${sourceLanguage} to ${targetLanguage}.`,
-  );
-
-  let response: Awaited<ReturnType<typeof client.models.generateContent>>;
-  try {
-    response = await generateContentWithRetry(() =>
-      client.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                text: `Translate every teacher transcript segment from ${sourceLanguage} to ${targetLanguage}.
-
-Return JSON only in exactly this format:
-{
-  "translatedSegments": [
-    {
-      "segmentIndex": 0,
-      "startTime": 0,
-      "endTime": 5,
-      "translatedText": "translated lesson segment"
-    }
-  ]
+  return translated;
 }
 
-Translation requirements:
-- Preserve every segment in the same order.
-- Do not summarize, merge, split, add, or remove segments.
-- Preserve each segmentIndex, startTime, and endTime exactly.
-- Preserve complete meaning, numbers, mathematical expressions, scientific terminology, names, and technical terms.
-- Use natural ${targetLanguage} suitable for a school student.
-- Return a non-empty translatedText for every input segment.
+function translationErrorStatus(error: unknown): string {
+  const details =
+    error && typeof error === "object"
+      ? (error as {
+          status?: unknown;
+          statusCode?: unknown;
+          code?: unknown;
+          error?: { status?: unknown; code?: unknown };
+        })
+      : {};
 
-Transcript segments:
-${JSON.stringify(
-  transcript.map((segment, segmentIndex) => ({
-    segmentIndex,
-    startTime: segment.startTime,
-    endTime: segment.endTime,
-    text: segment.text,
-  })),
-  null,
-  2,
-)}`,
-              },
-            ],
-          },
-        ],
-        config: { responseMimeType: "application/json" },
-      }),
-    );
-  } catch (error) {
-    throw new Error(
-      `Gemini translation failed after retries: ${
-        error instanceof Error ? error.message : "unknown provider error"
-      }`,
-    );
+  const nested = details.error;
+  const status = details.status ?? details.statusCode ?? nested?.status;
+  const code = details.code ?? nested?.code;
+
+  return [status, code]
+    .filter((value) => typeof value === "number" || typeof value === "string")
+    .map((value) => String(value).toLowerCase())
+    .join("/");
+}
+
+function translationRetryAfterMs(error: unknown): number | undefined {
+  const details =
+    error && typeof error === "object"
+      ? (error as {
+          retryAfter?: unknown;
+          retry_after?: unknown;
+          headers?: { get?: (name: string) => string | null } | Record<string, unknown>;
+          error?: { retryAfter?: unknown; retry_after?: unknown };
+        })
+      : {};
+
+  const headerValue =
+    typeof details.headers?.get === "function"
+      ? details.headers.get("retry-after")
+      : details.headers && typeof details.headers === "object"
+        ? (details.headers as Record<string, unknown>)["retry-after"] ??
+          (details.headers as Record<string, unknown>)["Retry-After"]
+        : undefined;
+  const value =
+    details.retryAfter ??
+    details.retry_after ??
+    details.error?.retryAfter ??
+    details.error?.retry_after ??
+    headerValue;
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.min(60_000, Math.max(0, value * 1_000));
   }
 
-  const result = GeminiTranslationBatchResponseSchema.parse(
-    parseJsonResponse(response.text ?? ""),
-  );
+  if (typeof value !== "string") return undefined;
 
-  if (result.translatedSegments.length !== transcript.length) {
-    throw new Error(
-      `Gemini returned ${result.translatedSegments.length} translated segments for ${transcript.length} transcript segments.`,
-    );
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) {
+    return Math.min(60_000, Math.max(0, seconds * 1_000));
   }
 
-  const translatedByIndex = new Map(
-    result.translatedSegments.map((segment) => [segment.segmentIndex, segment]),
-  );
+  const retryAt = Date.parse(value);
+  return Number.isNaN(retryAt)
+    ? undefined
+    : Math.min(60_000, Math.max(0, retryAt - Date.now()));
+}
 
-  return transcript.map((segment, segmentIndex) => {
-    const translated = translatedByIndex.get(segmentIndex);
-    if (
-      !translated ||
-      translated.startTime !== segment.startTime ||
-      translated.endTime !== segment.endTime ||
-      translated.segmentIndex !== segmentIndex
-    ) {
-      throw new Error(
-        `Gemini returned invalid ordering or timestamps for transcript segment ${segmentIndex}.`,
-      );
+function isTransientTranslationError(error: unknown): boolean {
+  const status = translationErrorStatus(error);
+  const text = providerErrorText(error);
+
+  return (
+    !isDailyGenerateQuotaError(error) &&
+    (status.includes("503") ||
+      status.includes("unavailable") ||
+      text.includes("service unavailable") ||
+      text.includes("temporarily unavailable") ||
+      text.includes("high demand"))
+  );
+}
+
+async function generateTranslationContentWithRetry<T>(
+  requestFactory: () => Promise<T>,
+): Promise<T> {
+  for (let attempt = 1; attempt <= TRANSLATION_MAX_ATTEMPTS; attempt += 1) {
+    console.info(
+      `[Video Classroom Voice] Translation attempt ${attempt}/${TRANSLATION_MAX_ATTEMPTS}`,
+    );
+
+    try {
+      const response = await generateContentWithTimeout(requestFactory);
+      console.info("[Video Classroom Voice] Translation succeeded", { attempt });
+      return response;
+    } catch (error) {
+      const transient = isTransientTranslationError(error);
+      const isLastAttempt = attempt === TRANSLATION_MAX_ATTEMPTS;
+
+      if (!transient || isLastAttempt) {
+        throw error;
+      }
+
+      const retryAfterMs = translationRetryAfterMs(error);
+      const baseDelay =
+        TRANSLATION_RETRY_DELAYS_MS[attempt - 1] ??
+        TRANSLATION_RETRY_DELAYS_MS.at(-1)!;
+      const jitter = Math.floor(Math.random() * Math.min(1_000, baseDelay * 0.25));
+      const delay = Math.min(60_000, retryAfterMs ?? baseDelay + jitter);
+
+      console.warn("[Video Classroom Voice] Gemini transient 503", {
+        attempt,
+        status: translationErrorStatus(error),
+        retryAfterMs,
+      });
+      console.info(`[Video Classroom Voice] Waiting ${delay} ms before retry`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
-    return translated.translatedText;
-  });
+  }
+
+  throw new Error("Gemini translation retry loop exited unexpectedly.");
 }
 
 async function transcriptVersion(
@@ -905,10 +1057,11 @@ export const processVideoClassroom =
           );
         }
 
-        const client =
-          new GoogleGenAI({
-            apiKey,
-          });
+        const client = createGeminiClient();
+        const modelCandidates = await getAvailableGeminiVideoModels(
+          client,
+          getGeminiVideoModelCandidates(),
+        );
 
         const uploaded =
           await client.files.upload({
@@ -1000,41 +1153,44 @@ export const processVideoClassroom =
             typeof client.models.generateContent
           >
         >;
+        let activeModelName = GEMINI_VIDEO_PRIMARY_MODEL;
 
         try {
-          response =
-            await generateContentWithRetry(
-              () =>
-                client.models.generateContent(
-                  {
-                    model:
-                      "gemini-3.6-flash",
+          const result = await generateContentWithRetry(
+            (modelName) =>
+              client.models.generateContent(
+                {
+                  model: modelName,
 
-                    contents: [
-                      {
-                        fileData: {
-                          fileUri:
-                            videoFile.uri!,
-                          mimeType:
-                            videoFile.mimeType!,
-                        },
+                  contents: [
+                    {
+                      fileData: {
+                        fileUri:
+                          videoFile.uri!,
+                        mimeType:
+                          videoFile.mimeType!,
                       },
-
-                      {
-                        text: `Analyze the complete uploaded teaching video and return only valid JSON. Do not use Markdown fences or add commentary. Build a classroom knowledge map for ${classroom.class_level} ${classroom.subject} about ${classroom.topic}. The original teaching language is ${classroom.teacher_language}; difficulty is ${classroom.difficulty}. Learning objectives: ${classroom.learning_objectives}. Additional teaching instructions: ${classroom.teaching_instructions ?? "None"}. Use timestamps from the actual video in seconds. Transcribe the teacher's spoken instruction into ordered, short timestamped segments; do not use topic timestamps as transcript timestamps. Include meaningful, non-overlapping topics covering the lesson and exactly one checkpoint for every topic. Every topic must have non-empty arrays for concepts, definitions, examples, and misconceptions. Return exactly this shape: {"lessonTitle":"string","summary":"string","keyLearningPoints":["string"],"transcriptSegments":[{"startTime":0,"endTime":6.5,"text":"spoken words from the video"}],"topics":[{"title":"string","summary":"string","startTime":0,"endTime":0,"concepts":["string"],"definitions":["string"],"examples":["string"],"misconceptions":["string"],"checkpoint":{"question":"string","expectedAnswer":"string","remediation":"string","miniQuizQuestion":"string"}}]}. Ensure transcript segments are in chronological order, have non-empty text, and each endTime is greater than or equal to its startTime. Ensure all required strings are non-empty.`,
-                      },
-                    ],
-
-                    config: {
-                      responseMimeType:
-                        "application/json",
                     },
+
+                    {
+                      text: `Analyze the complete uploaded teaching video and return only valid JSON. Do not use Markdown fences or add commentary. Build a classroom knowledge map for ${classroom.class_level} ${classroom.subject} about ${classroom.topic}. The original teaching language is ${classroom.teacher_language}; difficulty is ${classroom.difficulty}. Learning objectives: ${classroom.learning_objectives}. Additional teaching instructions: ${classroom.teaching_instructions ?? "None"}. Use timestamps from the actual video in seconds. Transcribe the teacher's spoken instruction into ordered, short timestamped segments; do not use topic timestamps as transcript timestamps. Include meaningful, non-overlapping topics covering the lesson and exactly one checkpoint for every topic. Every topic must have non-empty arrays for concepts, definitions, examples, and misconceptions. Return exactly this shape: {"lessonTitle":"string","summary":"string","keyLearningPoints":["string"],"transcriptSegments":[{"startTime":0,"endTime":6.5,"text":"spoken words from the video"}],"topics":[{"title":"string","summary":"string","startTime":0,"endTime":0,"concepts":["string"],"definitions":["string"],"examples":["string"],"misconceptions":["string"],"checkpoint":{"question":"string","expectedAnswer":"string","remediation":"string","miniQuizQuestion":"string"}}]}. Ensure transcript segments are in chronological order, have non-empty text, and each endTime is greater than or equal to its startTime. Ensure all required strings are non-empty.`,
+                    },
+                  ],
+
+                  config: {
+                    responseMimeType:
+                      "application/json",
                   },
-                ),
-            );
+                },
+              ),
+            modelCandidates.length > 0 ? modelCandidates : GEMINI_VIDEO_MODEL_CANDIDATES,
+          );
+
+          response = result.response;
+          activeModelName = result.modelName;
 
           console.log(
-            "[Gemini Video] generateContent completed.",
+            `[Gemini Video] generateContent completed using ${activeModelName}.`,
           );
         } catch (error) {
           console.error(
@@ -1780,6 +1936,15 @@ export const prepareVideoClassroomVoice =
 
       const version = await transcriptVersion(transcript);
       console.info("[Video Classroom Voice] transcript version:", version);
+      const singleFlightKey = `${classroom.id}:${version}:${data.language}`;
+      const inFlight = voicePreparationLocks.get(singleFlightKey);
+      if (inFlight) {
+        console.info("[Video Classroom Voice] reusing in-flight preparation", {
+          singleFlightKey,
+          targetLanguage: data.language,
+        });
+        return inFlight;
+      }
 
       const sourceLanguage = classroom.teacher_language.split("-")[0]?.toLowerCase() ?? "en";
       console.info("[Video Classroom Voice] target language:", data.language);
@@ -1876,7 +2041,11 @@ export const prepareVideoClassroomVoice =
           return readReadyTranslation(existing.id);
         }
 
-        throw new Error("Translated voice is already being prepared. Please wait a moment and retry.");
+        const preparingLock = voicePreparationLocks.get(singleFlightKey);
+        if (preparingLock) return preparingLock;
+        throw new Error(
+          "Translated voice is preparing in another server instance. Please retry after it reaches READY.",
+        );
       }
 
       const { data: cachedSegments, error: cachedSegmentsError } = existing
@@ -1893,16 +2062,6 @@ export const prepareVideoClassroomVoice =
       }
 
       const cachedByIndex = new Map((cachedSegments ?? []).map((segment) => [segment.segment_index, segment]));
-
-      const singleFlightKey = `${classroom.id}:${version}:${data.language}`;
-      const inFlight = voicePreparationLocks.get(singleFlightKey);
-      if (inFlight) {
-        console.info("[Video Classroom Voice] reusing in-flight preparation", {
-          singleFlightKey,
-          targetLanguage: data.language,
-        });
-        return inFlight;
-      }
 
       const translationPromise = (async (): Promise<VideoClassroomVoiceTranslation> => {
         const { data: translation, error: translationError } = await db
@@ -1961,11 +2120,18 @@ export const prepareVideoClassroomVoice =
 
             console.info(`[Video Classroom Voice] TTS started segment ${segmentIndex}`);
             console.info(`[Video Classroom Voice] Calling Indic-TTS for segment ${segmentIndex}`);
-            const audio = await provider.synthesize({
-              text: translatedText,
-              language: data.language,
-              segmentId: `${classroom.id}-${version}-${segmentIndex}`,
-            });
+            let audio;
+            try {
+              audio = await provider.synthesize({
+                text: translatedText,
+                language: data.language,
+                segmentId: `${classroom.id}-${version}-${segmentIndex}`,
+              });
+            } catch (error) {
+              throw new Error(
+                `Indic-TTS failed for segment ${segmentIndex}: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
             console.info(`[Video Classroom Voice] TTS completed segment ${segmentIndex}`);
             console.info(`[Video Classroom Voice] Indic-TTS returned bytes: ${audio.audio.byteLength}`);
 
@@ -2213,9 +2379,7 @@ export const evaluateVideoClassroomAnswer =
       }
 
       const client =
-        new GoogleGenAI({
-          apiKey,
-        });
+        createGeminiClient();
 
       const response =
         await client.models.generateContent(

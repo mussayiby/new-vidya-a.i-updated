@@ -17,6 +17,8 @@ import { Route as SignupRouteImport } from './routes/signup'
 import { Route as AppAiTutorCreateRouteImport } from './routes/app.ai-tutor-create'
 import { Route as AppAiTutorLibraryRouteImport } from './routes/app.ai-tutor-library'
 import { Route as AppDashboardRouteImport } from './routes/app.dashboard'
+import { Route as AppLearningQuestRouteImport } from './routes/app.learning-quest'
+import { Route as AppPracticeRouteImport } from './routes/app.practice'
 import { Route as AppProfileRouteImport } from './routes/app.profile'
 import { Route as AppProgressRouteImport } from './routes/app.progress'
 import { Route as AppTutorRouteImport } from './routes/app.tutor'
@@ -78,6 +80,16 @@ const AppAiTutorLibraryRoute = AppAiTutorLibraryRouteImport.update({
 const AppDashboardRoute = AppDashboardRouteImport.update({
   id: '/app/dashboard',
   path: '/app/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppLearningQuestRoute = AppLearningQuestRouteImport.update({
+  id: '/app/learning-quest',
+  path: '/app/learning-quest',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppPracticeRoute = AppPracticeRouteImport.update({
+  id: '/app/practice',
+  path: '/app/practice',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppProfileRoute = AppProfileRouteImport.update({
@@ -201,6 +213,8 @@ export interface FileRoutesByFullPath {
   '/app/ai-tutor-create': typeof AppAiTutorCreateRoute
   '/app/ai-tutor-library': typeof AppAiTutorLibraryRoute
   '/app/dashboard': typeof AppDashboardRoute
+  '/app/learning-quest': typeof AppLearningQuestRoute
+  '/app/practice': typeof AppPracticeRoute
   '/app/profile': typeof AppProfileRoute
   '/app/progress': typeof AppProgressRoute
   '/app/tutor': typeof AppTutorRoute
@@ -233,6 +247,8 @@ export interface FileRoutesByTo {
   '/app/ai-tutor-create': typeof AppAiTutorCreateRoute
   '/app/ai-tutor-library': typeof AppAiTutorLibraryRoute
   '/app/dashboard': typeof AppDashboardRoute
+  '/app/learning-quest': typeof AppLearningQuestRoute
+  '/app/practice': typeof AppPracticeRoute
   '/app/profile': typeof AppProfileRoute
   '/app/progress': typeof AppProgressRoute
   '/app/tutor': typeof AppTutorRoute
@@ -266,6 +282,8 @@ export interface FileRoutesById {
   '/app/ai-tutor-create': typeof AppAiTutorCreateRoute
   '/app/ai-tutor-library': typeof AppAiTutorLibraryRoute
   '/app/dashboard': typeof AppDashboardRoute
+  '/app/learning-quest': typeof AppLearningQuestRoute
+  '/app/practice': typeof AppPracticeRoute
   '/app/profile': typeof AppProfileRoute
   '/app/progress': typeof AppProgressRoute
   '/app/tutor': typeof AppTutorRoute
@@ -300,6 +318,8 @@ export interface FileRouteTypes {
     | '/app/ai-tutor-create'
     | '/app/ai-tutor-library'
     | '/app/dashboard'
+    | '/app/learning-quest'
+    | '/app/practice'
     | '/app/profile'
     | '/app/progress'
     | '/app/tutor'
@@ -332,6 +352,8 @@ export interface FileRouteTypes {
     | '/app/ai-tutor-create'
     | '/app/ai-tutor-library'
     | '/app/dashboard'
+    | '/app/learning-quest'
+    | '/app/practice'
     | '/app/profile'
     | '/app/progress'
     | '/app/tutor'
@@ -364,6 +386,8 @@ export interface FileRouteTypes {
     | '/app/ai-tutor-create'
     | '/app/ai-tutor-library'
     | '/app/dashboard'
+    | '/app/learning-quest'
+    | '/app/practice'
     | '/app/profile'
     | '/app/progress'
     | '/app/tutor'
@@ -397,6 +421,8 @@ export interface RootRouteChildren {
   AppAiTutorCreateRoute: typeof AppAiTutorCreateRoute
   AppAiTutorLibraryRoute: typeof AppAiTutorLibraryRoute
   AppDashboardRoute: typeof AppDashboardRoute
+  AppLearningQuestRoute: typeof AppLearningQuestRoute
+  AppPracticeRoute: typeof AppPracticeRoute
   AppProfileRoute: typeof AppProfileRoute
   AppProgressRoute: typeof AppProgressRoute
   AppTutorRoute: typeof AppTutorRoute
@@ -469,6 +495,20 @@ declare module '@tanstack/react-router' {
       path: '/app/dashboard'
       fullPath: '/app/dashboard'
       preLoaderRoute: typeof AppDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app/learning-quest': {
+      id: '/app/learning-quest'
+      path: '/app/learning-quest'
+      fullPath: '/app/learning-quest'
+      preLoaderRoute: typeof AppLearningQuestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app/practice': {
+      id: '/app/practice'
+      path: '/app/practice'
+      fullPath: '/app/practice'
+      preLoaderRoute: typeof AppPracticeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/profile': {
@@ -672,6 +712,8 @@ const rootRouteChildren: RootRouteChildren = {
   AppAiTutorCreateRoute: AppAiTutorCreateRoute,
   AppAiTutorLibraryRoute: AppAiTutorLibraryRoute,
   AppDashboardRoute: AppDashboardRoute,
+  AppLearningQuestRoute: AppLearningQuestRoute,
+  AppPracticeRoute: AppPracticeRoute,
   AppProfileRoute: AppProfileRoute,
   AppProgressRoute: AppProgressRoute,
   AppTutorRoute: AppTutorRoute,

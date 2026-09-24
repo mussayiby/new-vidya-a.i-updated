@@ -683,6 +683,10 @@ function ClassroomPlayer({
     if (!audio) return;
     audio.pause();
     audio.onloadedmetadata = null;
+    audio.onerror = null;
+    audio.currentTime = 0;
+    audio.removeAttribute("src");
+    audio.load();
     audioSegmentRef.current = -1;
   };
 
@@ -691,7 +695,16 @@ function ClassroomPlayer({
     segmentIndex: number,
     audioUrl: string,
   ) => {
-    if (audioPlayPromiseRef.current || !audio.paused) return;
+    const video = videoRef.current;
+    if (
+      audioPlayPromiseRef.current ||
+      !audio.paused ||
+      !video ||
+      video.paused ||
+      video.ended ||
+      voiceLanguage === "original"
+    )
+      return;
 
     const generation = audioGenerationRef.current;
     const playPromise = audio.play();
@@ -699,15 +712,16 @@ function ClassroomPlayer({
 
     void playPromise
       .then(() => {
-        if (audioPlayPromiseRef.current !== playPromise) return;
-        audioPlayPromiseRef.current = null;
-        if (
-          generation !== audioGenerationRef.current ||
-          audioSegmentRef.current !== segmentIndex ||
-          audio.src !== audioUrl
-        ) {
+        const isCurrentRequest = audioPlayPromiseRef.current === playPromise;
+        const isCurrentSegment =
+          generation === audioGenerationRef.current &&
+          audioSegmentRef.current === segmentIndex &&
+          audio.src === audioUrl;
+        if (!isCurrentRequest || !isCurrentSegment || videoRef.current?.ended) {
+          if (isCurrentSegment) audio.pause();
           return;
         }
+        audioPlayPromiseRef.current = null;
         console.info("[Video Classroom Voice] audio playback started", {
           segmentIndex,
           audioUrl,
@@ -735,6 +749,15 @@ function ClassroomPlayer({
   const syncTranslatedAudio = (position: number, shouldPlay: boolean, forceSeek = false) => {
     const audio = audioRef.current;
     const translation = voiceRef.current;
+    const video = videoRef.current;
+    const canPlay = Boolean(
+      shouldPlay &&
+        video &&
+        !video.paused &&
+        !video.ended &&
+        voiceLanguage !== "original",
+    );
+    if (voiceLanguage !== "original" && video) video.muted = true;
     if (!audio || !translation?.segments.length) {
       console.info("[Video Classroom Voice] audio URL loaded", {
         hasAudio: Boolean(audio),
@@ -765,6 +788,8 @@ function ClassroomPlayer({
       audio.pause();
       audioPlayPromiseRef.current = null;
       audio.onloadedmetadata = null;
+      audio.onerror = null;
+      audio.currentTime = 0;
       audio.removeAttribute("src");
       audio.load();
       audio.src = segment.audioUrl;
@@ -778,7 +803,17 @@ function ClassroomPlayer({
         });
       };
       audio.onloadedmetadata = () => {
-        if (generation !== audioGenerationRef.current || audioSegmentRef.current !== segmentIndex) {
+        const currentVideo = videoRef.current;
+        const currentPosition = currentVideo?.currentTime ?? 0;
+        const currentSegmentIndex = translation.segments.findIndex(
+          (currentSegment) =>
+            currentPosition >= currentSegment.startTime && currentPosition < currentSegment.endTime,
+        );
+        if (
+          generation !== audioGenerationRef.current ||
+          audioSegmentRef.current !== segmentIndex ||
+          currentSegmentIndex !== segmentIndex
+        ) {
           return;
         }
         console.info("[Video Classroom Voice] audio can play", {
@@ -787,22 +822,22 @@ function ClassroomPlayer({
           duration: audio.duration,
           offset,
         });
-        audio.currentTime = offset;
+        audio.currentTime = Math.max(0, currentPosition - segment.startTime);
         const segmentDuration = segment.endTime - segment.startTime;
         if (Number.isFinite(audio.duration) && segmentDuration > 0) {
           audio.playbackRate = Math.min(2, Math.max(0.75, audio.duration / segmentDuration));
         }
-        if (shouldPlay) {
+        if (currentVideo && !currentVideo.paused && !currentVideo.ended && voiceLanguage !== "original") {
           playTranslatedAudio(audio, segmentIndex, segment.audioUrl);
         }
       };
       audio.load();
     } else if (forceSeek) {
       audio.currentTime = offset;
-      if (shouldPlay) {
+      if (canPlay) {
         playTranslatedAudio(audio, segmentIndex, segment.audioUrl);
       }
-    } else if (shouldPlay && audio.paused) {
+    } else if (canPlay && audio.paused) {
       playTranslatedAudio(audio, segmentIndex, segment.audioUrl);
     }
   };
@@ -819,9 +854,9 @@ function ClassroomPlayer({
 
     const requestId = ++voiceRequestRef.current;
     stopTranslatedAudio();
+    voiceRef.current = null;
+    setVoiceTranslation(null);
     if (language === "original" || language === originalLanguage) {
-      voiceRef.current = null;
-      setVoiceTranslation(null);
       setVoiceStatus("idle");
       setVoiceError(null);
       if (videoRef.current) videoRef.current.muted = false;
@@ -869,7 +904,7 @@ function ClassroomPlayer({
       setVoiceTranslation(null);
       setVoiceStatus("failed");
       setVoiceError(error instanceof Error ? error.message : "Translated teacher voice failed.");
-      if (videoRef.current) videoRef.current.muted = false;
+      if (videoRef.current) videoRef.current.muted = true;
     }
   };
 
@@ -989,13 +1024,23 @@ function ClassroomPlayer({
     video.play().catch(() => undefined);
   };
 
-  const refreshClassroom = async () => {
+  const refreshClassroom = async (accessToken?: string) => {
+    const session = await supabase.auth.getSession();
+    const token = accessToken ?? session.data.session?.access_token;
+    if (!token) throw new Error("Your session expired. Please sign in again.");
+    setClassroomData(
+      await getVideoClassroom({ data: { accessToken: token, classroomId: data.classroom.id } }),
+    );
+  };
+
+  const getFreshAccessToken = async () => {
+    const refreshed = await supabase.auth.refreshSession();
+    if (refreshed.data.session?.access_token) return refreshed.data.session.access_token;
+
     const session = await supabase.auth.getSession();
     const accessToken = session.data.session?.access_token;
     if (!accessToken) throw new Error("Your session expired. Please sign in again.");
-    setClassroomData(
-      await getVideoClassroom({ data: { accessToken, classroomId: data.classroom.id } }),
-    );
+    return accessToken;
   };
 
   const startProcessing = async () => {
@@ -1019,11 +1064,9 @@ function ClassroomPlayer({
     setPublishing(true);
     setMessage(null);
     try {
-      const session = await supabase.auth.getSession();
-      const accessToken = session.data.session?.access_token;
-      if (!accessToken) throw new Error("Your session expired. Please sign in again.");
+      const accessToken = await getFreshAccessToken();
       await publishVideoClassroom({ data: { accessToken, classroomId: data.classroom.id } });
-      await refreshClassroom();
+      await refreshClassroom(accessToken);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The classroom could not be published.");
     } finally {
@@ -1099,6 +1142,7 @@ function ClassroomPlayer({
                 ref={videoRef}
                 className="h-full w-full"
                 controls
+                muted={voiceLanguage !== "original"}
                 playsInline
                 onTimeUpdate={onTimeUpdate}
                 onPlay={() => syncTranslatedAudio(videoRef.current?.currentTime ?? 0, true)}

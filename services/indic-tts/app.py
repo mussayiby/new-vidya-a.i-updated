@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import re
 import threading
 import traceback
 from http import HTTPStatus
@@ -31,6 +32,54 @@ TARGET_SAMPLE_RATE = 22050
 
 _synthesizers: dict[str, Synthesizer] = {}
 _synthesizer_lock = threading.Lock()
+
+
+def normalize_tts_text(text: str, language: str, aggressive: bool = False) -> str:
+    if language != "hi":
+        return text.strip()
+
+    digit_words = {
+        "०": "शून्य",
+        "१": "एक",
+        "२": "दो",
+        "३": "तीन",
+        "४": "चार",
+        "५": "पाँच",
+        "६": "छह",
+        "७": "सात",
+        "८": "आठ",
+        "९": "नौ",
+    }
+    ascii_digit_words = (
+        "शून्य",
+        "एक",
+        "दो",
+        "तीन",
+        "चार",
+        "पाँच",
+        "छह",
+        "सात",
+        "आठ",
+        "नौ",
+    )
+
+    normalized = text.strip()
+    normalized = re.sub(r"\.\s*\. +\s*।?", "।", normalized)
+    normalized = re.sub(r"\.\s*\.+\s*।?", "।", normalized)
+    normalized = re.sub(r"(?:।\s*){2,}", "।", normalized)
+    normalized = re.sub(r"\.{2,}", "।", normalized)
+    normalized = re.sub(r"\.(?=\s|$)", "।", normalized)
+    normalized = re.sub(r"\bA\s*/\s*B\b", "ए और बी", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"[०-९]", lambda match: digit_words[match.group(0)], normalized)
+    normalized = re.sub(
+        r"[0-9]",
+        lambda match: ascii_digit_words[int(match.group(0))],
+        normalized,
+    )
+    normalized = re.sub(r"[\[\]{}<>|~^*_+=\\]", " ", normalized)
+    if aggressive:
+        normalized = re.sub(r"[A-Za-z]+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def model_paths(language: str) -> dict[str, Path]:
@@ -95,7 +144,7 @@ def synthesize(text: str, language: str, speaker_name: str | None = None) -> byt
     selected_speaker = speaker_name or _resolve_speaker_name(language, synthesizer)
 
     waveform = synthesizer.tts(
-        text,
+        normalize_tts_text(text, language),
         speaker_name=selected_speaker,
     )
 

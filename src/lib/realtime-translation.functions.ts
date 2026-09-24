@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { getGeminiApiKey } from "@/lib/gemini.server";
 
 const languageIds = z.enum([
   "en",
@@ -20,18 +21,6 @@ type GeminiTokenResponse = {
   };
 };
 
-function geminiApiKey(): string | undefined {
-  const processLike = globalThis as typeof globalThis & {
-    process?: {
-      env?: {
-        GEMINI_API_KEY?: string;
-      };
-    };
-  };
-
-  return processLike.process?.env?.GEMINI_API_KEY?.trim();
-}
-
 /**
  * Gives one browser a short-lived Gemini token.
  */
@@ -40,7 +29,7 @@ export const createRealtimeTranslationToken = createServerFn({
 })
   .validator((input: unknown) => languageIds.parse(input))
   .handler(async () => {
-    const apiKey = geminiApiKey();
+    const apiKey = getGeminiApiKey();
 
     if (!apiKey) {
       throw new Error(

@@ -1,6 +1,9 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
+import { useEffect } from "react";
+import { AppShell } from "@/components/layout/AppShell";
 import { getSubject, lessonsBySubject } from "@/data/subjects";
 import { LessonCard } from "@/components/ui-kit/LessonCard";
+import { useLearningCompanion } from "@/context/LearningCompanionContext";
 
 export const Route = createFileRoute("/app/subjects/$subjectId")({
   head: () => ({
@@ -28,8 +31,14 @@ export const Route = createFileRoute("/app/subjects/$subjectId")({
 
 function SubjectDetail() {
   const { subject, lessons } = Route.useLoaderData();
+  const { setLearningContext } = useLearningCompanion();
+
+  useEffect(() => {
+    setLearningContext({ subjectId: subject.id, subject: subject.name, activity: "subject lessons" });
+  }, [setLearningContext, subject.id, subject.name]);
 
   return (
+    <AppShell>
     <main className="mx-auto w-full max-w-4xl px-4 py-10">
       <h1 className="text-2xl font-bold">{subject.name}</h1>
       <p className="mt-1 text-muted-foreground">{subject.description}</p>
@@ -40,5 +49,6 @@ function SubjectDetail() {
         ))}
       </div>
     </main>
+    </AppShell>
   );
 }

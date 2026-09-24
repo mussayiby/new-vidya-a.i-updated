@@ -222,10 +222,12 @@ export const liveService = {
   },
 
   async postMessage(classId: string, text: string, lang: string) {
-    const { error } = await supabase
-      .from("live_messages")
-      .insert({ class_id: classId, source_text: text, source_lang: lang });
-    if (error) throw new Error(error.message);
+    const { postLiveMessage } = await import("@/lib/live-message.functions");
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error || !session?.access_token) throw new Error("Authentication required to share speech.");
+    await postLiveMessage({
+      data: { accessToken: session.access_token, classId, sourceText: text, sourceLang: lang },
+    });
   },
 
   async listMessages(classId: string): Promise<LiveMessage[]> {
@@ -237,5 +239,21 @@ export const liveService = {
       .limit(200);
     if (error) throw new Error(error.message);
     return (data ?? []) as LiveMessage[];
+  },
+
+  async translateMessage(message: LiveMessage, targetLang: string): Promise<string> {
+    const { translateLiveMessage } = await import("@/lib/live-message.functions");
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error || !session?.access_token) throw new Error("Authentication required for translation.");
+    const response = await translateLiveMessage({
+      data: {
+        accessToken: session.access_token,
+        classId: message.class_id,
+        sourceText: message.source_text,
+        sourceLang: message.source_lang,
+        targetLang: targetLang as "en" | "bn" | "hi" | "kn" | "ml" | "mr" | "ta" | "te" | "ur",
+      },
+    });
+    return response.text;
   },
 };

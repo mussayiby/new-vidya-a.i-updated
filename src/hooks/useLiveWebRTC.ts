@@ -29,11 +29,7 @@ function sendSignal(
   event: string,
   payload: SignalPayload,
 ) {
-  void channel.httpSend({
-    type: "broadcast",
-    event,
-    payload,
-  });
+  void channel.httpSend(event, payload);
 }
 
 export function useLiveWebRTC({ classId, role, active = true }: Options) {

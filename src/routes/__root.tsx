@@ -13,6 +13,7 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AppProvider } from "@/context/AppContext";
+import { LearningCompanionProvider } from "@/context/LearningCompanionContext";
 import { Toaster } from "@/components/ui/sonner";
 import { useApp } from "@/hooks/useApp";
 
@@ -131,7 +132,9 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AppProvider>
-        <AuthGate />
+        <LearningCompanionProvider>
+          <AuthGate />
+        </LearningCompanionProvider>
         <Toaster />
       </AppProvider>
     </QueryClientProvider>

@@ -48,6 +48,8 @@ export function useSpeechRecognition(options: {
   const langRef = useRef(lang);
   langRef.current = lang;
 
+  const normalizeFinal = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim();
+
   useEffect(() => {
     setSupported(Boolean(getRecognitionCtor()));
   }, []);
@@ -67,12 +69,22 @@ export function useSpeechRecognition(options: {
         const text = result[0].transcript.trim();
         if (!text) continue;
         if (result.isFinal) {
-          // Browsers can repeat the last final result when a recognition session
-          // restarts after a pause. Keep intentional repeats after new speech.
-          if (text !== lastFinalRef.current) {
-            lastFinalRef.current = text;
-            onFinalRef.current(text);
-          }
+          const previous = lastFinalRef.current;
+          const normalizedText = normalizeFinal(text);
+          const normalizedPrevious = normalizeFinal(previous);
+          if (!normalizedText || normalizedText === normalizedPrevious) continue;
+
+          // Chrome may replay the prior final result after restarting recognition.
+          // If it appends new words, publish only the new suffix instead of the
+          // entire cumulative transcript.
+          const nextText = normalizedPrevious && normalizedText.startsWith(normalizedPrevious)
+            ? text.slice(previous.length).trim()
+            : normalizedPrevious && normalizedPrevious.startsWith(normalizedText)
+              ? ""
+              : text;
+          if (!nextText.trim()) continue;
+          lastFinalRef.current = text;
+          onFinalRef.current(nextText.trim());
         }
         else pending += ` ${text}`;
       }

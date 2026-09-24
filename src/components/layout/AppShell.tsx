@@ -16,6 +16,7 @@ import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { useApp } from "@/hooks/useApp";
 import { cn } from "@/lib/utils";
+import { LearningCompanionPanel } from "@/components/layout/LearningCompanionPanel";
 
 const nav = [
   { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -138,6 +139,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <div className="min-w-0 flex-1">{children}</div>
       </div>
+      <LearningCompanionPanel />
     </div>
   );
 }

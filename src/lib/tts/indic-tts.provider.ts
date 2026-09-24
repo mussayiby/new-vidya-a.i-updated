@@ -22,26 +22,45 @@ function providerError(payload: unknown, status: number): string {
   return `Indic-TTS service failed (HTTP ${status}).`;
 }
 
-function normalizeIndicTtsText(text: string, language: string): string {
+function normalizeIndicTtsText(text: string, language: string, aggressive = false): string {
   if (language !== "hi") return text.trim();
 
+  const digitWords = [
+    "शून्य",
+    "एक",
+    "दो",
+    "तीन",
+    "चार",
+    "पाँच",
+    "छह",
+    "सात",
+    "आठ",
+    "नौ",
+  ];
   const digitMap: Record<string, string> = {
-    "0": "०",
-    "1": "१",
-    "2": "२",
-    "3": "३",
-    "4": "४",
-    "5": "५",
-    "6": "६",
-    "7": "७",
-    "8": "८",
-    "9": "९",
+    "०": "शून्य",
+    "१": "एक",
+    "२": "दो",
+    "३": "तीन",
+    "४": "चार",
+    "५": "पाँच",
+    "६": "छह",
+    "७": "सात",
+    "८": "आठ",
+    "९": "नौ",
   };
 
-  let normalized = text.trim();
-  normalized = normalized.replace(/[0-9]/g, (digit) => digitMap[digit] ?? digit);
+  let normalized = text.normalize("NFKC").trim();
+  normalized = normalized.replace(/\.\s*\.+\s*।?/g, "।");
+  normalized = normalized.replace(/(?:।\s*){2,}/g, "।");
+  normalized = normalized.replace(/\.{2,}/g, "।");
   normalized = normalized.replace(/\.(?=\s|$)/g, "।");
-  return normalized;
+  normalized = normalized.replace(/\bA\s*\/\s*B\b/gi, "ए और बी");
+  normalized = normalized.replace(/[०-९]/g, (digit) => digitMap[digit] ?? digit);
+  normalized = normalized.replace(/[0-9]/g, (digit) => digitWords[Number(digit)] ?? digit);
+  normalized = normalized.replace(/[\[\]{}<>|~^*_+=\\]/g, " ");
+  if (aggressive) normalized = normalized.replace(/[A-Za-z]+/g, " ");
+  return normalized.replace(/\s+/g, " ").trim();
 }
 
 function validateWav(audio: Uint8Array): void {
@@ -89,70 +108,58 @@ export function createIndicTtsProvider(): TextToSpeechProvider {
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-      const normalizedText = normalizeIndicTtsText(text, language);
-      if (normalizedText !== text) {
-        console.info("[Indic-TTS] normalized text before synthesis", {
-          language,
-          originalText: text,
-          normalizedText,
-        });
-      }
-
-      console.info("[Indic-TTS] synthesize request", {
-        language,
-        segmentId,
-        text: normalizedText,
-      });
-      console.info("[Indic-TTS] synthesize request JSON", JSON.stringify({ text: normalizedText, language }));
-      console.info("[Indic-TTS] synthesize request codepoints", {
-        language,
-        segmentId,
-        codepoints: [...normalizedText.slice(0, 100)].map((char) => {
-          const code = char.codePointAt(0);
-          return `U+${code?.toString(16).toUpperCase().padStart(4, "0") ?? "00"}`;
-        }),
-      });
-
       try {
-        let response: Response;
-        try {
-          response = await fetch(`${getIndicTtsUrl().replace(/\/$/, "")}/synthesize`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json; charset=utf-8" },
-            body: JSON.stringify({ text: normalizedText, language, speakerName: "female" }),
-            signal: controller.signal,
-          });
-        } catch (error) {
-          if (error instanceof DOMException && error.name === "AbortError") {
-            throw new Error("Indic-TTS service timed out while generating audio.");
+        let lastError: unknown;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const normalizedText = normalizeIndicTtsText(text, language, attempt === 1);
+          if (normalizedText !== text || attempt > 0) {
+            console.info("[Indic-TTS] normalized text before synthesis", {
+              language,
+              segmentId,
+              attempt: attempt + 1,
+              normalizedText,
+            });
           }
-          throw new Error(
-            `Indic-TTS service is unavailable: ${error instanceof Error ? error.message : "network error"}`,
-          );
+          try {
+            const response = await fetch(`${getIndicTtsUrl().replace(/\/$/, "")}/synthesize`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json; charset=utf-8" },
+              body: JSON.stringify({ text: normalizedText, language, speakerName: "female" }),
+              signal: controller.signal,
+            });
+            if (!response.ok) {
+              const payload = await response.json().catch(() => null);
+              throw new Error(providerError(payload, response.status));
+            }
+            const audio = new Uint8Array(await response.arrayBuffer());
+            if (audio.byteLength === 0) throw new Error("Indic-TTS returned empty audio.");
+            validateWav(audio);
+            return {
+              audio,
+              mimeType: "audio/wav",
+              provider: "ai4bharat-indic-tts-v1",
+              language,
+              cacheKey: `indic-tts-v1/${language}/${segmentId}`,
+            };
+          } catch (error) {
+            if (error instanceof DOMException && error.name === "AbortError") {
+              throw new Error("Indic-TTS service timed out while generating audio.");
+            }
+            lastError = error;
+            if (attempt === 0) {
+              console.warn("[Indic-TTS] retrying segment with aggressive local normalization", {
+                language,
+                segmentId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+              continue;
+            }
+            throw new Error(
+              `Indic-TTS service is unavailable: ${lastError instanceof Error ? lastError.message : "network error"}`,
+            );
+          }
         }
-
-        if (!response.ok) {
-          const payload = await response.json().catch(() => null);
-          throw new Error(providerError(payload, response.status));
-        }
-
-        const audio = new Uint8Array(await response.arrayBuffer());
-        console.info("[Indic-TTS] synthesize response", {
-          status: response.status,
-          contentType: response.headers.get("content-type"),
-          byteLength: audio.byteLength,
-          wavHeaderPreview: Array.from(audio.slice(0, 12)).map((byte) => byte.toString(16).padStart(2, "0")).join(" "),
-        });
-
-        if (audio.byteLength === 0) throw new Error("Indic-TTS returned empty audio.");
-        validateWav(audio);
-        return {
-          audio,
-          mimeType: "audio/wav",
-          provider: "ai4bharat-indic-tts-v1",
-          language,
-          cacheKey: `indic-tts-v1/${language}/${segmentId}`,
-        };
+        throw lastError instanceof Error ? lastError : new Error("Indic-TTS synthesis failed.");
       } finally {
         clearTimeout(timeoutId);
       }

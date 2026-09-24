@@ -28,11 +28,13 @@ import {
 import { subjects } from "@/data/subjects";
 import { useApp } from "@/hooks/useApp";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
+import type { TutorVisualResult } from "@/lib/tutor-chat.functions";
 import { tutorPersistenceService } from "@/services/tutor-persistence.service";
 import type { TutorMessage } from "@/services/tutor-persistence.types";
 import { tutorService } from "@/services/tutor.service";
 
 type TutorState = "ready" | "listening" | "thinking" | "speaking" | "error";
+type TutorVisualState = TutorVisualResult | { status: "loading" };
 
 const defaultTutorSetup = {
   name: "",
@@ -86,6 +88,9 @@ function TutorPage() {
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [lastAnswer, setLastAnswer] = useState<string | null>(null);
+  const [visuals, setVisuals] = useState<Record<string, TutorVisualState>>({});
   const [error, setError] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(true);
   const [showSetup, setShowSetup] = useState(false);
@@ -187,10 +192,12 @@ function TutorPage() {
 
   const speakResponse = (text: string) => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-      setError("Text-to-speech is not supported in this browser.");
+      setVoiceError("Voice playback is not supported in this browser. You can still read the answer.");
       return;
     }
 
+    setVoiceError(null);
+    setLastAnswer(text);
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = normalizeSpeechLanguage(profile.language || setupForm.language);
     utterance.rate = 0.88;
@@ -210,13 +217,31 @@ function TutorPage() {
     }
 
     window.speechSynthesis.cancel();
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => {
-      setError("Speech playback failed. You can still read the answer in the chat.");
+    utterance.onstart = () => {
+      console.info("[Tutor TTS] playback started");
+      setIsSpeaking(true);
+    };
+    utterance.onend = () => {
+      console.info("[Tutor TTS] playback completed");
       setIsSpeaking(false);
     };
-    window.speechSynthesis.speak(utterance);
+    utterance.onerror = (event) => {
+      setIsSpeaking(false);
+      if (event.error === "canceled" || event.error === "interrupted") return;
+      console.error("[Tutor TTS] playback error", event.error);
+      setVoiceError("Speech playback failed. You can still read the answer in the chat.");
+    };
+    console.info("[Tutor TTS] request started", {
+      characters: text.length,
+      language: utterance.lang,
+    });
+    try {
+      window.speechSynthesis.speak(utterance);
+    } catch (speechError) {
+      console.error("[Tutor TTS] playback error", speechError);
+      setIsSpeaking(false);
+      setVoiceError("Speech playback failed. You can still read the answer in the chat.");
+    }
   };
 
   const handleSend = async (textOverride?: string) => {
@@ -236,12 +261,13 @@ function TutorPage() {
       setDraft("");
       setIsSending(true);
       setError(null);
+      setVoiceError(null);
       speech.stop();
       window.speechSynthesis?.cancel();
       setIsSpeaking(false);
 
       await tutorPersistenceService.addMessage(conversationId, "user", nextPrompt);
-      const answer = await tutorService.ask({
+      const response = await tutorService.askWithMetadata({
         message: nextPrompt,
         conversationId,
         language: profile.language || setupForm.language,
@@ -249,7 +275,8 @@ function TutorPage() {
 
       const refreshedMessages = await tutorPersistenceService.listMessages(conversationId);
       setMessages(refreshedMessages);
-      speakResponse(answer);
+      speakResponse(response.text);
+      void loadTutorVisual(response.messageId, nextPrompt, response.text);
     } catch (err) {
       const message = err instanceof Error ? err.message : "The AI tutor request failed.";
       setError(message);
@@ -273,6 +300,9 @@ function TutorPage() {
       setMessages([]);
       setDraft("");
       setError(null);
+      setVoiceError(null);
+      setLastAnswer(null);
+      setVisuals({});
       speech.stop();
       window.speechSynthesis?.cancel();
       setIsSpeaking(false);
@@ -293,6 +323,28 @@ function TutorPage() {
     }
 
     await speech.start();
+  };
+
+  const replayAnswer = () => {
+    if (lastAnswer) speakResponse(lastAnswer);
+  };
+
+  const loadTutorVisual = async (messageId: string, question: string, answer: string) => {
+    setVisuals((current) => ({ ...current, [messageId]: { status: "loading" } }));
+    try {
+      const result = await tutorService.generateVisual({
+        question,
+        answer,
+        language: profile.language || setupForm.language,
+      });
+      setVisuals((current) => ({ ...current, [messageId]: result }));
+    } catch (visualError) {
+      console.warn("[Tutor Visual] client request failed", visualError);
+      setVisuals((current) => ({
+        ...current,
+        [messageId]: { status: "unavailable", reason: "unknown" },
+      }));
+    }
   };
 
   const handleSetupSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -681,15 +733,59 @@ function TutorPage() {
                       key={message.id}
                       className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
                     >
-                      <div
-                        className={[
-                          "max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed shadow-sm",
-                          message.role === "user"
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted text-foreground",
-                        ].join(" ")}
-                      >
-                        {message.content}
+                      <div>
+                        <div
+                          className={[
+                            "max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed shadow-sm",
+                            message.role === "user"
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-muted text-foreground",
+                          ].join(" ")}
+                        >
+                          {message.content}
+                        </div>
+                        {message.role === "assistant" ? (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="mt-1 gap-2 px-2 text-xs text-muted-foreground"
+                              onClick={() => speakResponse(message.content)}
+                            >
+                              <Volume2 className="size-3.5" /> Play answer
+                            </Button>
+                            {(() => {
+                              const visual = visuals[message.id];
+                              if (visual?.status === "loading") {
+                                return (
+                                  <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                                    <LoaderCircle className="size-3.5 animate-spin" /> Creating a visual explanation...
+                                  </div>
+                                );
+                              }
+                              if (visual?.status === "unavailable") {
+                                return (
+                                  <p className="mt-2 text-xs text-muted-foreground">
+                                    Visual temporarily unavailable. Your answer and voice are still ready.
+                                  </p>
+                                );
+                              }
+                              if (visual?.status !== "ready") return null;
+                              return (
+                                <figure className="mt-2 max-w-xl overflow-hidden rounded-xl border bg-background">
+                                  <img
+                                    src={`data:${visual.image.mimeType};base64,${visual.image.data}`}
+                                    alt={visual.purpose}
+                                    className="h-auto w-full"
+                                  />
+                                  <figcaption className="border-t px-3 py-2 text-xs text-muted-foreground">
+                                    {visual.purpose}
+                                  </figcaption>
+                                </figure>
+                              );
+                            })()}
+                          </>
+                        ) : null}
                       </div>
                     </div>
                   ))
@@ -773,9 +869,23 @@ function TutorPage() {
                 <p>
                   <span className="font-medium text-foreground">Tutor:</span> {stateLabel}
                 </p>
+                <p>
+                  <span className="font-medium text-foreground">Voice:</span>{" "}
+                  {isSpeaking ? "Playing" : voiceError ? "Playback unavailable" : "Ready"}
+                </p>
+                {lastAnswer && !isSpeaking ? (
+                  <Button variant="outline" size="sm" className="gap-2" onClick={replayAnswer}>
+                    <RotateCcw className="size-3.5" /> Play answer
+                  </Button>
+                ) : null}
                 {error ? (
                   <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-red-700">
                     {error}
+                  </p>
+                ) : null}
+                {voiceError ? (
+                  <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-700">
+                    {voiceError}
                   </p>
                 ) : null}
                 {speech.error ? (

@@ -16,9 +16,9 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
 import { liveLanguages } from "@/data/live-languages";
-import { liveService, type LiveClass } from "@/lib/live.service";
+import { liveService, type LiveClass, type LiveMessage } from "@/lib/live.service";
+import { supabase } from "@/integrations/supabase/client";
 import { useLiveWebRTC } from "@/hooks/useLiveWebRTC";
-import { useRealtimeTranslation } from "@/hooks/useRealtimeTranslation";
 
 const searchSchema = z.object({ lang: z.string().optional() });
 
@@ -82,29 +82,84 @@ function WatchClassPage({ liveClass }: { liveClass: LiveClass }) {
   const navigate = useNavigate();
   const [status, setStatus] = useState("Connecting to the classroom...");
   const [error, setError] = useState<string | null>(null);
-  const [translationEnabled, setTranslationEnabled] = useState(false);
+  const [captionsEnabled, setCaptionsEnabled] = useState(false);
+  const [captionStatus, setCaptionStatus] = useState<"idle" | "connecting" | "connected" | "error">("idle");
+  const [captions, setCaptions] = useState<Array<{ id: string; text: string }>>([]);
   const selected = liveLanguages.find((item) => item.id === lang);
   const media = useLiveWebRTC({ classId: liveClass.id, role: "student" });
-  const realtimeTarget = selected?.id ?? null;
-  const muteOriginalAudio = useCallback(
-    () => media.setRemoteAudioMuted(true),
-    [media.setRemoteAudioMuted],
-  );
-  const translation = useRealtimeTranslation({
-    sourceStream: media.remoteStream,
-    targetLanguage: realtimeTarget,
-    enabled: translationEnabled,
-    onTranslatedAudioStart: muteOriginalAudio,
-  });
 
   const enableTranslation = useCallback(() => {
-    if (!realtimeTarget) {
+    if (!selected) {
       setError("Choose a valid mother tongue from the join page.");
       return;
     }
     setError(null);
-    setTranslationEnabled(true);
-  }, [realtimeTarget]);
+    setCaptionsEnabled(true);
+  }, [selected]);
+
+  useEffect(() => {
+    if (!captionsEnabled || !selected) {
+      setCaptionStatus("idle");
+      return;
+    }
+
+    let active = true;
+    const processedIds = new Set<string>();
+    let translationQueue = Promise.resolve();
+
+    const publishCaption = (message: LiveMessage) => {
+      if (!active || processedIds.has(message.id)) return;
+      processedIds.add(message.id);
+      translationQueue = translationQueue
+        .then(async () => {
+          const text = await liveService.translateMessage(message, selected.id);
+          if (!active) return;
+          setCaptions((current) => [...current, { id: message.id, text }]);
+        })
+        .catch((translationError) => {
+          if (!active) return;
+          console.warn("[live-translation] finalized message translation failed", translationError);
+          setCaptionStatus("error");
+        });
+    };
+
+    const channel = supabase
+      .channel(`live-messages-${liveClass.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "live_messages",
+          filter: `class_id=eq.${liveClass.id}`,
+        },
+        (payload) => publishCaption(payload.new as LiveMessage),
+      );
+
+    setCaptionStatus("connecting");
+    void liveService
+      .listMessages(liveClass.id)
+      .then((messages) => messages.forEach(publishCaption))
+      .catch((loadError) => {
+        if (active) {
+          console.warn("[live-translation] could not load existing messages", loadError);
+          setCaptionStatus("error");
+        }
+      });
+
+    channel.subscribe((subscriptionStatus) => {
+      if (!active) return;
+      if (subscriptionStatus === "SUBSCRIBED") setCaptionStatus("connected");
+      if (subscriptionStatus === "CHANNEL_ERROR" || subscriptionStatus === "TIMED_OUT") {
+        setCaptionStatus("error");
+      }
+    });
+
+    return () => {
+      active = false;
+      void supabase.removeChannel(channel);
+    };
+  }, [captionsEnabled, liveClass.id, selected]);
 
   useEffect(() => {
     if (media.classEnded) {
@@ -185,25 +240,24 @@ function WatchClassPage({ liveClass }: { liveClass: LiveClass }) {
 
             <div className="mt-4 flex items-center justify-between rounded-lg bg-primary-soft p-3">
               <span className="text-sm text-primary">
-                {translation.status === "live"
-                  ? "Live translated audio is playing"
-                  : translationEnabled
-                    ? "Starting live translation..."
-                    : "Use live translated audio instead of the teacher's original voice"}
+                {captionStatus === "connected"
+                  ? "Live translated captions connected"
+                  : captionStatus === "connecting"
+                    ? "Connecting translated captions..."
+                    : captionStatus === "error"
+                      ? "Translated captions temporarily unavailable"
+                      : "Receive translated captions from the teacher"}
               </span>
               <Button
                 size="sm"
                 variant="default"
                 onClick={enableTranslation}
-                disabled={translationEnabled && translation.status !== "error"}
+                disabled={captionsEnabled && captionStatus !== "error"}
               >
                 <Volume2 className="size-4" />{" "}
-                {translation.status === "live" ? "Translated live" : "Enable live translation"}
+                {captionStatus === "connected" ? "Captions connected" : "Enable live captions"}
               </Button>
             </div>
-            {translation.error && (
-              <p className="mt-3 text-sm text-destructive">{translation.error}</p>
-            )}
 
             <div className="mt-5 flex items-center gap-3">
               <span className="grid size-10 place-items-center rounded-xl bg-muted text-muted-foreground">
@@ -230,10 +284,13 @@ function WatchClassPage({ liveClass }: { liveClass: LiveClass }) {
             </div>
             <div className="mt-5 space-y-4">
               <p className="text-base font-medium">
-                {translation.caption ||
-                  (translationEnabled
-                    ? "Listening for the teacher..."
-                    : "Enable live translation to receive translated audio and captions.")}
+                {captions.length > 0
+                  ? captions.map((caption) => <span key={caption.id} className="block">{caption.text}</span>)
+                  : captionsEnabled
+                    ? captionStatus === "error"
+                      ? "Translated captions are unavailable. Teacher audio remains connected."
+                      : "Listening for finalized teacher utterances..."
+                    : "Enable live captions to receive translated teacher utterances."}
               </p>
             </div>
             <Button

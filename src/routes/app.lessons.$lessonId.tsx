@@ -1,5 +1,13 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
+import { CheckCircle2, Download, ArrowLeft } from "lucide-react";
+import { useEffect, useState } from "react";
+import { AppShell } from "@/components/layout/AppShell";
+import { Button } from "@/components/ui/button";
 import { getLesson, getSubject } from "@/data/subjects";
+import { questionsForLesson } from "@/data/offline-quizzes";
+import { useApp } from "@/hooks/useApp";
+import { useLearningCompanion } from "@/context/LearningCompanionContext";
+import { offlineLearningService } from "@/services/offline-learning.service";
 
 export const Route = createFileRoute("/app/lessons/$lessonId")({
   head: () => ({
@@ -27,14 +35,68 @@ export const Route = createFileRoute("/app/lessons/$lessonId")({
 
 function LessonDetail() {
   const { lesson, subject } = Route.useLoaderData();
+  const { completedLessons, toggleLessonComplete } = useApp();
+  const { setLearningContext } = useLearningCompanion();
+  const [downloaded, setDownloaded] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const completed = completedLessons.includes(lesson.id);
+
+  useEffect(() => {
+    setLearningContext({
+      subjectId: lesson.subjectId,
+      ...(subject?.name ? { subject: subject.name } : {}),
+      lesson: lesson.title,
+      topic: lesson.title,
+      activity: "lesson",
+    });
+    void offlineLearningService.getPackage(lesson.id).then((item) => setDownloaded(Boolean(item)));
+    void offlineLearningService.saveProgress({
+      lessonId: lesson.id,
+      position: 0,
+      completed,
+      updatedAt: new Date().toISOString(),
+      synced: false,
+    });
+  }, [completed, lesson.id, lesson.subjectId, lesson.title, setLearningContext, subject?.name]);
+
+  const markComplete = () => {
+    toggleLessonComplete(lesson.id);
+    void offlineLearningService.saveProgress({
+      lessonId: lesson.id,
+      position: lesson.duration * 60,
+      completed: !completed,
+      updatedAt: new Date().toISOString(),
+      synced: false,
+    });
+  };
+
+  const download = async () => {
+    try {
+      await offlineLearningService.savePackage(lesson, questionsForLesson(lesson.id));
+      setDownloaded(true);
+      setMessage("Lesson and available quiz content saved to this device.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "This lesson could not be saved offline.");
+    }
+  };
 
   return (
+    <AppShell>
     <main className="mx-auto w-full max-w-3xl px-4 py-10">
+      <Button variant="ghost" asChild className="mb-5 gap-2"><a href="/app/subjects"><ArrowLeft className="size-4" /> Learning Hub</a></Button>
       <p className="text-sm text-muted-foreground">
         {subject?.name} · {lesson.duration} min
       </p>
       <h1 className="mt-1 text-2xl font-bold">{lesson.title}</h1>
       <p className="mt-2 text-muted-foreground">{lesson.summary}</p>
+      <div className="mt-5 flex flex-wrap gap-3">
+        <Button onClick={markComplete} variant={completed ? "outline" : "default"} className="gap-2">
+          <CheckCircle2 className="size-4" /> {completed ? "Mark as incomplete" : "Mark lesson complete"}
+        </Button>
+        <Button onClick={() => void download()} variant="outline" className="gap-2" disabled={downloaded}>
+          <Download className="size-4" /> {downloaded ? "Available offline" : "Download lesson"}
+        </Button>
+      </div>
 
       <section className="mt-6 space-y-3">
         {lesson.explanation.map((para) => (
@@ -65,6 +127,8 @@ function LessonDetail() {
           ))}
         </ul>
       </section>
+      {message ? <p className="mt-6 rounded-xl bg-primary-soft p-3 text-sm text-primary">{message}</p> : null}
     </main>
+    </AppShell>
   );
 }

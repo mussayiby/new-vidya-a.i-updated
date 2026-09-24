@@ -1,100 +1,35 @@
-import { createFileRoute } from "@tanstack/react-router";
-import {
-  Activity,
-  AlertTriangle,
-  ArrowDownRight,
-  ArrowUpRight,
-  BarChart3,
-  BookOpen,
-  Brain,
-  CheckCircle2,
-  ChevronDown,
-  ClipboardCheck,
-  Clock3,
-  GraduationCap,
-  Lightbulb,
-  Star,
-  Trophy,
-  Users,
-} from "lucide-react";
-import type { ComponentType, ReactNode } from "react";
-import { useMemo } from "react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { ArrowLeft, BookOpen, CheckCircle2, ClipboardCheck, Clock3, CloudOff, Target, Trophy } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
-import { ProgressBar } from "@/components/ui-kit/ProgressBar";
-import { lessonsBySubject, subjects } from "@/data/subjects";
+import { Button } from "@/components/ui/button";
+import { lessons, lessonsBySubject, subjects } from "@/data/subjects";
 import { useApp } from "@/hooks/useApp";
 import { dashboardAnalyticsService } from "@/services/dashboard-analytics.service";
-import { cn } from "@/lib/utils";
-
-const fallbackChart = [
-  { day: "Sep 10", score: 40 },
-  { day: "Sep 11", score: 52 },
-  { day: "Sep 12", score: 58 },
-  { day: "Sep 13", score: 71 },
-  { day: "Sep 14", score: 65 },
-  { day: "Sep 15", score: 78 },
-  { day: "Sep 16", score: 83 },
-];
+import { offlineLearningService, type OfflineGameSession, type OfflineQuizAttempt, type OfflineProgress } from "@/services/offline-learning.service";
 
 export const Route = createFileRoute("/app/progress")({
-  head: () => ({
-    meta: [
-      { title: "Progress — Vidya A.I." },
-      {
-        name: "description",
-        content:
-          "Track weekly study time, quiz scores, subject completion and achievements on Vidya A.I.",
-      },
-      { property: "og:title", content: "Progress — Vidya A.I." },
-      {
-        property: "og:description",
-        content: "Weekly study time, quiz scores and achievements.",
-      },
-    ],
-  }),
+  head: () => ({ meta: [{ title: "My Progress — Vidya A.I." }, { name: "description", content: "See your real lesson and practice progress." }] }),
   component: ProgressPage,
 });
 
-const difficultTopics = [["Fractions", "Mathematics", 52], ["Photosynthesis", "Science", 48], ["Grammar (Tenses)", "English", 45], ["LCM & HCF", "Mathematics", 42], ["Decimals", "Mathematics", 38]] as const;
-const topStudents = [["Ayesha Khan", 96], ["Rohan Singh", 94], ["Zainab Fatima", 92], ["Arjun Menon", 90], ["Sneha Patil", 88]] as const;
-const attentionStudents = [["Sameer Ali", "Mathematics", 42], ["Fatima Noor", "English", 48], ["Riya Sharma", "Science", 52], ["Adnan Khan", "Social Science", 55], ["Meera Joshi", "Mathematics", 58]] as const;
-const activities = [["Sep 16, 10:24 AM", "Ayesha Khan", "Completed lesson: Photosynthesis", "Science", "100%"], ["Sep 16, 09:12 AM", "Rohan Singh", "Quiz: Fractions", "Mathematics", "80%"], ["Sep 16, 08:45 AM", "Zainab Fatima", "Completed lesson: Grammar (Tenses)", "English", "Completed"]] as const;
-
 function ProgressPage() {
-  const { user, profile, completedLessons } = useApp();
-  const weeklyData = useMemo(() => user?.id ? dashboardAnalyticsService.getWeeklyBreakdown(user.id) : [], [user?.id]);
-  const hoursThisWeek = useMemo(() => user?.id ? dashboardAnalyticsService.getHoursThisWeek(user.id) : 0, [user?.id]);
-  const subjectRows = subjects.slice(0, 5).map((subject) => {
-    const lessons = lessonsBySubject(subject.id);
-    const completed = lessons.filter((lesson) => completedLessons.includes(lesson.id)).length;
-    const score = lessons.length ? Math.round((completed / lessons.length) * 100) : 0;
-    return { name: subject.name, score, count: `${completed}/${lessons.length}`, icon: subject.name.slice(0, 1), color: "bg-red-50 text-red-600" };
-  });
-  const chartData = weeklyData.some((item) => item.minutes > 0) ? weeklyData.map((item) => ({ day: item.day, score: Math.min(100, item.minutes * 2) })) : fallbackChart;
-  const cards = [[Users, "Total Students", 48, "5", "up"], [BookOpen, "Lessons Completed", completedLessons.length || 186, "24%", "up"], [ClipboardCheck, "Quizzes Attempted", 342, "18%", "up"], [Star, "Average Score", "78%", "6%", "up"], [GraduationCap, "Active Students", 36, "8", "up"], [AlertTriangle, "Need Attention", 7, "3", "down"]] as const;
+  const { user, completedLessons } = useApp();
+  const [attempts, setAttempts] = useState<OfflineQuizAttempt[]>([]);
+  const [localProgress, setLocalProgress] = useState<OfflineProgress[]>([]);
+  const [gameSessions, setGameSessions] = useState<OfflineGameSession[]>([]);
 
-  return <AppShell><main className="min-w-0 bg-white px-4 py-7 sm:px-6 lg:px-8 lg:py-9">
-    <header className="flex flex-col gap-5 border-b border-slate-100 pb-7 sm:flex-row sm:items-start sm:justify-between"><div className="flex items-start gap-3"><span className="mt-1 grid size-11 place-items-center rounded-2xl bg-red-50 text-primary"><BarChart3 className="size-5" /></span><div><h1 className="text-3xl font-bold tracking-tight text-slate-950">Progress</h1><p className="mt-1 text-sm text-slate-500">{hoursThisWeek} hours studied this week across your subjects.</p></div></div><div className="flex items-center gap-3 text-slate-500"><button className="grid size-10 place-items-center rounded-xl border border-slate-100 hover:bg-slate-50" aria-label="Notifications"><Activity className="size-4" /></button><span className="grid size-9 place-items-center rounded-full bg-red-100 text-xs font-bold text-primary">{profile.name?.slice(0, 2).toUpperCase() || "ST"}</span><span className="hidden text-sm font-semibold text-slate-800 sm:inline">{profile.name || "Student"}</span><ChevronDown className="size-4" /><button className="ml-2 flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700">Last 7 Days <ChevronDown className="size-4" /></button></div></header>
-    <section className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">{cards.map(([Icon, title, value, trend, direction]) => <KpiCard key={title} Icon={Icon} title={title} value={value} trend={trend} direction={direction} />)}</section>
-    <section className="mt-6 grid gap-5 xl:grid-cols-[2fr_1fr_1fr]"><Panel title="Overall Performance Trend" icon={BarChart3} action="Last 7 Days" className="min-h-[350px]"><div className="mt-5 h-[245px]"><ResponsiveContainer width="100%" height="100%"><AreaChart data={chartData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}><defs><linearGradient id="progress-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#e23737" stopOpacity={0.18} /><stop offset="100%" stopColor="#e23737" stopOpacity={0.01} /></linearGradient></defs><CartesianGrid vertical={false} stroke="#eef0f3" strokeDasharray="3 3" /><XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 11 }} dy={8} /><YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 11 }} /><Tooltip /><Area type="monotone" dataKey="score" stroke="#df3438" strokeWidth={2.5} fill="url(#progress-fill)" dot={{ r: 4, fill: "#fff", stroke: "#df3438", strokeWidth: 2 }} /></AreaChart></ResponsiveContainer></div><div className="mt-1 flex items-center gap-2 text-xs font-medium text-slate-500"><span className="size-2 rounded-full bg-primary" /> Average Score</div></Panel><Panel title="Subject-wise Performance" icon={BookOpen} action="View All"><div className="mt-5 space-y-4">{subjectRows.map((row) => <SubjectRow key={row.name} {...row} />)}</div></Panel><Panel title="Most Difficult Topics" icon={AlertTriangle} action="View All"><div className="mt-4 space-y-4">{difficultTopics.map(([topic, subject, score], index) => <div key={topic} className="flex gap-3"><span className="grid size-6 shrink-0 place-items-center rounded-full bg-red-50 text-xs font-bold text-primary">{index + 1}</span><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><div><p className="truncate text-sm font-semibold text-slate-800">{topic}</p><p className="mt-0.5 text-xs text-slate-400">{subject}</p></div><span className="text-sm font-bold text-slate-700">{score}%</span></div><div className="mt-2 h-1.5 rounded-full bg-red-50"><div className="h-full rounded-full bg-red-400" style={{ width: `${score}%` }} /></div></div></div>)}</div></Panel></section>
-    <section className="mt-5 grid gap-5 xl:grid-cols-3"><Panel title="Top Performing Students" icon={Trophy} action="View All"><div className="mt-4 divide-y divide-slate-100">{topStudents.map(([name, score], index) => <div key={name} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"><span className="grid size-7 place-items-center rounded-full bg-emerald-50 text-xs font-bold text-emerald-600">{index + 1}</span><span className="flex-1 text-sm font-semibold text-slate-700">{name}</span><span className="text-sm font-bold text-emerald-600">{score}%</span><span className="w-16"><ProgressBar value={score} size="sm" /></span></div>)}</div></Panel><Panel title="Students Needing Attention" icon={Users} action="View All"><div className="mt-4 divide-y divide-slate-100">{attentionStudents.map(([name, subject, score]) => <div key={name} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"><span className="grid size-8 place-items-center rounded-full bg-red-50 text-xs font-bold text-red-500">{name.split(" ").map((part) => part[0]).join("")}</span><div className="min-w-0 flex-1"><p className="text-sm font-semibold text-slate-700">{name}</p><p className="text-xs text-slate-400">{subject}</p></div><span className="text-sm font-bold text-red-500">{score}%</span></div>)}</div></Panel><Panel title="AI Insights" icon={Lightbulb}><div className="mt-4 space-y-2.5"><Insight icon={ArrowUpRight} tone="red" title="Mathematics performance improved by 12%" text="compared to last week. Great progress!" /><Insight icon={AlertTriangle} tone="amber" title="7 students are consistently scoring below 50%" text="in Fractions. Consider providing extra practice." /><Insight icon={Star} tone="green" title="Kannada shows the highest engagement" text="with 90% average score and 15 lessons completed." /><Insight icon={Brain} tone="blue" title="Students who completed video lessons" text="are 2.5x more likely to score above 80%." /></div></Panel></section>
-    <Panel title="Recent Learning Activity" icon={Clock3} action="View All" className="mt-5"><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[680px] text-left text-sm"><thead><tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400"><th className="pb-3 font-semibold">Date &amp; Time</th><th className="pb-3 font-semibold">Student</th><th className="pb-3 font-semibold">Activity</th><th className="pb-3 font-semibold">Subject</th><th className="pb-3 text-right font-semibold">Score / Status</th></tr></thead><tbody>{activities.map(([date, student, activity, subject, score]) => <tr key={`${date}-${student}`} className="border-b border-slate-50 last:border-0"><td className="py-4 text-slate-500">{date}</td><td className="py-4 font-semibold text-slate-700">{student}</td><td className="py-4 text-slate-600">{activity}</td><td className="py-4 text-slate-500">{subject}</td><td className="py-4 text-right font-bold text-emerald-600">{score}</td></tr>)}</tbody></table></div></Panel>
-  </main></AppShell>;
+  useEffect(() => {
+    void Promise.all([offlineLearningService.listAttempts(), offlineLearningService.listProgress(), offlineLearningService.listGameSessions()]).then(([savedAttempts, savedProgress, savedSessions]) => { setAttempts(savedAttempts); setLocalProgress(savedProgress); setGameSessions(savedSessions); });
+  }, []);
+
+  const completionEvents = user?.id ? dashboardAnalyticsService.getCompletionEvents(user.id) : [];
+  const accuracy = attempts.length ? Math.round((attempts.reduce((sum, attempt) => sum + attempt.score, 0) / attempts.reduce((sum, attempt) => sum + attempt.total, 0)) * 100) : null;
+  const pendingSync = localProgress.filter((item) => !item.synced).length + attempts.filter((item) => !item.synced).length + gameSessions.filter((item) => !item.synced).length;
+  const completedBySubject = useMemo(() => subjects.map((subject) => { const subjectLessons = lessonsBySubject(subject.id); const completed = subjectLessons.filter((lesson) => completedLessons.includes(lesson.id)).length; return { subject, completed, total: subjectLessons.length }; }), [completedLessons]);
+
+  return <AppShell><main className="min-h-screen bg-[#fffaf2] px-4 py-8 sm:px-6 lg:px-10"><div className="mx-auto max-w-6xl"><Button variant="ghost" asChild className="gap-2"><Link to="/app/subjects"><ArrowLeft className="size-4" /> Learning Hub</Link></Button><header className="mt-6"><p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Your learning record</p><h1 className="mt-2 text-4xl font-black text-slate-900">My Progress</h1><p className="mt-2 text-slate-600">These numbers come from your completed lessons, practice attempts, and Learning Quest sessions on this device.</p></header><section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5"><Metric icon={BookOpen} label="Lessons completed" value={`${completedLessons.length}/${lessons.length}`} /><Metric icon={ClipboardCheck} label="Quiz attempts" value={`${attempts.length}`} /><Metric icon={Target} label="Quiz accuracy" value={accuracy === null ? "No attempts" : `${accuracy}%`} /><Metric icon={TrophyIcon} label="Quest sessions" value={`${gameSessions.length}`} /><Metric icon={CloudOff} label="Waiting to sync" value={`${pendingSync}`} /></section><section className="mt-8 grid gap-6 lg:grid-cols-[1.3fr_0.7fr]"><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex items-center gap-3"><span className="rounded-xl bg-primary/10 p-2 text-primary"><BookOpen className="size-5" /></span><h2 className="text-xl font-black">Subject progress</h2></div><div className="mt-6 space-y-5">{completedBySubject.map(({ subject, completed, total }) => <div key={subject.id}><div className="flex items-center justify-between text-sm"><span className="font-bold">{subject.name}</span><span className="text-slate-500">{completed}/{total}</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-primary" style={{ width: `${total ? (completed / total) * 100 : 0}%` }} /></div></div>)}</div></div><div className="rounded-3xl border border-slate-200 bg-[#203b35] p-6 text-white shadow-sm"><Clock3 className="size-6 text-[#f4c66d]" /><h2 className="mt-4 text-xl font-black">Recent activity</h2>{completionEvents.length === 0 && attempts.length === 0 && gameSessions.length === 0 ? <p className="mt-3 text-sm text-white/70">Complete a lesson, quiz, or quest to start building your progress record.</p> : <div className="mt-4 space-y-3 text-sm text-white/80">{completionEvents.slice(0, 3).map((event) => <p key={`${event.lessonId}-${event.completedAt}`}>Completed {lessons.find((lesson) => lesson.id === event.lessonId)?.title ?? event.lessonId}</p>)}{attempts.slice(0, 3).map((attempt) => <p key={attempt.id}>Practice score: {attempt.score}/{attempt.total}</p>)}{gameSessions.slice(0, 3).map((session) => <p key={session.id}>Quest: {session.correct}/{session.completed} correct, {session.xp} XP</p>)}</div>}</div></section><section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex items-center gap-3"><CheckCircle2 className="size-5 text-emerald-600" /><h2 className="text-xl font-black">Sync status</h2></div><p className="mt-3 text-sm text-slate-600">Local learning data is retained across refreshes. Supabase synchronization is not connected for the static catalog's local progress yet, so pending items remain safely on this device.</p></section></div></main></AppShell>;
 }
 
-function KpiCard({ Icon, title, value, trend, direction }: { Icon: ComponentType<{ className?: string }>; title: string; value: string | number; trend: string; direction: "up" | "down" }) { const positive = direction === "up"; return <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.035)]"><div className="flex items-center justify-between"><span className="grid size-9 place-items-center rounded-xl bg-red-50 text-primary"><Icon className="size-4" /></span><span className={cn("flex items-center gap-0.5 text-xs font-bold", positive ? "text-emerald-600" : "text-red-500")}>{positive ? <ArrowUpRight className="size-3.5" /> : <ArrowDownRight className="size-3.5" />}{trend}</span></div><p className="mt-4 text-xs font-medium text-slate-500">{title}</p><p className="mt-1 text-2xl font-bold tracking-tight text-slate-950">{value}</p><p className="mt-1 text-[11px] text-slate-400">vs. last 7 days</p></div>; }
-
-function Panel({ title, icon: Icon, action, children, className }: { title: string; icon: ComponentType<{ className?: string }>; action?: string; children: ReactNode; className?: string }) { return <section className={cn("rounded-2xl border border-slate-100 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.035)]", className)}><div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2.5"><span className="grid size-8 place-items-center rounded-lg bg-red-50 text-primary"><Icon className="size-4" /></span><h2 className="text-sm font-bold text-slate-900">{title}</h2></div>{action ? <button className="flex items-center gap-1 text-xs font-semibold text-primary hover:underline">{action}{action === "Last 7 Days" ? <ChevronDown className="size-3.5" /> : null}</button> : null}</div>{children}</section>; }
-
-function SubjectRow({ name, score, count, icon, color }: { name: string; score: number; count: string; icon: string; color: string }) { return <div><div className="flex items-center gap-2.5"><span className={cn("grid size-7 place-items-center rounded-lg text-xs font-bold", color)}>{icon}</span><span className="flex-1 text-sm font-semibold text-slate-700">{name}</span><span className="text-sm font-bold text-slate-800">{score}%</span><span className="w-12 text-right text-xs text-slate-400">{count}</span></div><div className="mt-2"><ProgressBar value={score} size="sm" /></div></div>; }
-
-function Insight({ icon: Icon, tone, title, text }: { icon: ComponentType<{ className?: string }>; tone: "red" | "amber" | "green" | "blue"; title: string; text: string }) { const tones = { red: "bg-red-50 text-red-600", amber: "bg-amber-50 text-amber-600", green: "bg-emerald-50 text-emerald-600", blue: "bg-blue-50 text-blue-600" }; return <div className="flex gap-3 rounded-xl bg-slate-50/80 p-3"><span className={cn("grid size-7 shrink-0 place-items-center rounded-lg", tones[tone])}><Icon className="size-3.5" /></span><p className="text-xs leading-5 text-slate-500"><strong className="font-bold text-slate-800">{title}</strong> {text}</p></div>; }
+function TrophyIcon({ className }: { className?: string }) { return <Trophy className={className} />; }
+function Metric({ icon: Icon, label, value }: { icon: typeof BookOpen | typeof TrophyIcon; label: string; value: string }) { return <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><span className="grid size-10 place-items-center rounded-xl bg-[#fff0cf] text-[#9a681c]"><Icon className="size-5" /></span><p className="mt-4 text-sm text-slate-500">{label}</p><p className="mt-1 text-2xl font-black text-slate-900">{value}</p></div>; }
