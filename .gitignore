@@ -23,6 +23,8 @@ services/indic-tts/models/
 *.ckpt
 
 # Build output
+.vite-cache/
+.vite-cache-clean/
 dist/
 dist-ssr/
 .output/

@@ -27,7 +27,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useApp } from "@/hooks/useApp";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
-import { supabase } from "@/integrations/supabase/client";
+import { getFreshSupabaseSession, supabase } from "@/integrations/supabase/client";
 import {
   attachVideoToClassroom,
   createVideoClassroom,
@@ -101,8 +101,8 @@ function VideoClassroomPage() {
 
   const openClassroom = async (classroom: VideoClassroom, initialLanguage = profile.language) => {
     try {
-      const session = await supabase.auth.getSession();
-      const accessToken = session.data.session?.access_token;
+      const session = await getFreshSupabaseSession(true);
+      const accessToken = session.access_token;
       if (!accessToken) throw new Error("Your session expired. Please sign in again.");
       setSelectedLanguage(initialLanguage);
       setSelectedClassroom(
@@ -280,10 +280,9 @@ function CreateClassroom({
     }
     setWorking(true);
     try {
-      const session = await supabase.auth.getSession();
-      const accessToken = session.data.session?.access_token;
-      const user = session.data.session?.user;
-      if (!accessToken || !user) throw new Error("Your session expired. Please sign in again.");
+      const session = await getFreshSupabaseSession(true);
+      const accessToken = session.access_token;
+      const user = session.user;
       const classroom = await createVideoClassroom({ data: { accessToken, ...form } });
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-").toLowerCase();
       const videoPath = `${user.id}/${classroom.id}/${crypto.randomUUID()}-${safeName}`;
@@ -462,8 +461,8 @@ function ManageClassrooms({
   const [loading, setLoading] = useState(true);
   const load = useCallback(async () => {
     try {
-      const session = await supabase.auth.getSession();
-      const accessToken = session.data.session?.access_token;
+      const session = await getFreshSupabaseSession(true);
+      const accessToken = session.access_token;
       if (!accessToken) throw new Error("Your session expired. Please sign in again.");
       setClassrooms(await listMyVideoClassrooms({ data: { accessToken } }));
     } catch (error) {
@@ -553,8 +552,8 @@ function JoinClassroom({
     setWorking(true);
     setMessage(null);
     try {
-      const session = await supabase.auth.getSession();
-      const accessToken = session.data.session?.access_token;
+      const session = await getFreshSupabaseSession(true);
+      const accessToken = session.access_token;
       if (!accessToken) throw new Error("Your session expired. Please sign in again.");
       const classroom = await joinVideoClassroom({
         data: { accessToken, code, language, learningStyle, learningPreference: preference },
@@ -662,12 +661,17 @@ function ClassroomPlayer({
   );
   const [voiceStatus, setVoiceStatus] = useState<"idle" | "preparing" | "ready" | "failed">("idle");
   const [voiceError, setVoiceError] = useState<string | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [audioAutoplayBlocked, setAudioAutoplayBlocked] = useState(false);
   const voiceRef = useRef<VideoClassroomVoiceTranslation | null>(null);
   const audioSegmentRef = useRef(-1);
   const completedTopics = useRef(new Set<string>());
   const audioGenerationRef = useRef(0);
-  const audioPlayPromiseRef = useRef<Promise<void> | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioGainRef = useRef<GainNode | null>(null);
+  const decodedAudioRef = useRef(new Map<string, AudioBuffer>());
+  const audioDecodePromisesRef = useRef(new Map<string, Promise<AudioBuffer>>());
+  const activeAudioSourcesRef = useRef(new Set<AudioBufferSourceNode>());
+  const audioSchedulePromiseRef = useRef<Promise<void> | null>(null);
   const voiceRequestRef = useRef(0);
   const previousVideoTimeRef = useRef(0);
   const lastSavedAt = useRef(0);
@@ -676,94 +680,155 @@ function ClassroomPlayer({
     [classroomData.checkpoints],
   );
 
+  const getAudioContext = () => {
+    if (audioContextRef.current && audioGainRef.current) {
+      return { context: audioContextRef.current, gain: audioGainRef.current };
+    }
+
+    const windowWithWebkitAudio = window as typeof window & {
+      webkitAudioContext?: typeof AudioContext;
+    };
+    const AudioContextConstructor =
+      windowWithWebkitAudio.AudioContext ?? windowWithWebkitAudio.webkitAudioContext;
+    if (!AudioContextConstructor) {
+      throw new Error("This browser does not support translated audio playback.");
+    }
+
+    const context = new AudioContextConstructor();
+    const gain = context.createGain();
+    gain.gain.value = 1;
+    gain.connect(context.destination);
+    audioContextRef.current = context;
+    audioGainRef.current = gain;
+    return { context, gain };
+  };
+
+  const loadTranslatedAudio = async (audioUrl: string): Promise<AudioBuffer> => {
+    const cached = decodedAudioRef.current.get(audioUrl);
+    if (cached) return cached;
+
+    const pending = audioDecodePromisesRef.current.get(audioUrl);
+    if (pending) return pending;
+
+    const { context } = getAudioContext();
+    const decodePromise = fetch(audioUrl)
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Translated audio could not be downloaded (HTTP ${response.status}).`);
+        }
+        return response.arrayBuffer();
+      })
+      .then((audioData) => context.decodeAudioData(audioData.slice(0)))
+      .then((audioBuffer) => {
+        decodedAudioRef.current.set(audioUrl, audioBuffer);
+        return audioBuffer;
+      })
+      .finally(() => audioDecodePromisesRef.current.delete(audioUrl));
+
+    audioDecodePromisesRef.current.set(audioUrl, decodePromise);
+    return decodePromise;
+  };
+
+  const preloadTranslatedAudio = async (translation: VideoClassroomVoiceTranslation) => {
+    try {
+      await Promise.all(translation.segments.map((segment) => loadTranslatedAudio(segment.audioUrl)));
+    } catch (error) {
+      throw new Error(
+        `Translated Hindi audio could not be prepared: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
+
   const stopTranslatedAudio = () => {
     audioGenerationRef.current += 1;
-    audioPlayPromiseRef.current = null;
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.pause();
-    audio.onloadedmetadata = null;
-    audio.onerror = null;
-    audio.currentTime = 0;
-    audio.removeAttribute("src");
-    audio.load();
+    audioSchedulePromiseRef.current = null;
+    for (const source of activeAudioSourcesRef.current) {
+      try {
+        source.stop();
+      } catch {
+      }
+      source.disconnect();
+    }
+    activeAudioSourcesRef.current.clear();
     audioSegmentRef.current = -1;
   };
 
-  const playTranslatedAudio = (
-    audio: HTMLAudioElement,
-    segmentIndex: number,
-    audioUrl: string,
-  ) => {
+  const scheduleTranslatedAudio = async (position: number) => {
     const video = videoRef.current;
-    if (
-      audioPlayPromiseRef.current ||
-      !audio.paused ||
-      !video ||
-      video.paused ||
-      video.ended ||
-      voiceLanguage === "original"
-    )
+    const translation = voiceRef.current;
+    if (!video || !translation?.segments.length || voiceLanguage === "original") return;
+
+    const generation = ++audioGenerationRef.current;
+    const { context, gain } = getAudioContext();
+    await context.resume();
+    if (context.state !== "running") {
+      throw new Error("Browser audio is blocked. Click Enable Hindi audio to start playback.");
+    }
+    if (generation !== audioGenerationRef.current || video.paused || video.ended || voiceLanguage === "original") {
       return;
+    }
 
-    const generation = audioGenerationRef.current;
-    const playPromise = audio.play();
-    audioPlayPromiseRef.current = playPromise;
+    const segmentIndex = translation.segments.findIndex(
+      (segment) => position >= segment.startTime && position < segment.endTime,
+    );
+    if (segmentIndex < 0) return;
 
-    void playPromise
-      .then(() => {
-        const isCurrentRequest = audioPlayPromiseRef.current === playPromise;
-        const isCurrentSegment =
-          generation === audioGenerationRef.current &&
-          audioSegmentRef.current === segmentIndex &&
-          audio.src === audioUrl;
-        if (!isCurrentRequest || !isCurrentSegment || videoRef.current?.ended) {
-          if (isCurrentSegment) audio.pause();
-          return;
-        }
-        audioPlayPromiseRef.current = null;
-        console.info("[Video Classroom Voice] audio playback started", {
-          segmentIndex,
-          audioUrl,
-        });
-      })
-      .catch((error: unknown) => {
-        if (audioPlayPromiseRef.current === playPromise) {
-          audioPlayPromiseRef.current = null;
-        }
-        const isExpectedInterruption =
-          error instanceof DOMException && error.name === "AbortError";
-        const isStaleRequest =
-          generation !== audioGenerationRef.current ||
-          audioSegmentRef.current !== segmentIndex ||
-          audio.src !== audioUrl;
-        if (isExpectedInterruption || isStaleRequest) return;
-        console.error("[Video Classroom Voice] audio playback failed", {
-          segmentIndex,
-          audioUrl,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
+    const buffers = await Promise.all(
+      translation.segments.slice(segmentIndex).map((segment) => loadTranslatedAudio(segment.audioUrl)),
+    );
+    if (generation !== audioGenerationRef.current || video.paused || video.ended || voiceLanguage === "original") {
+      return;
+    }
+
+    const videoPlaybackRate = Math.max(0.25, video.playbackRate || 1);
+    const scheduleStart = context.currentTime + 0.05;
+    let nextStart = scheduleStart;
+
+    translation.segments.slice(segmentIndex).forEach((segment, relativeIndex) => {
+      const buffer = buffers[relativeIndex];
+      if (!buffer) return;
+
+      const isCurrentSegment = relativeIndex === 0;
+      const segmentDuration = Math.max(0.05, segment.endTime - segment.startTime);
+      const segmentWallDuration = segmentDuration / videoPlaybackRate;
+      const positionOffset = isCurrentSegment ? Math.max(0, position - segment.startTime) : 0;
+      const remainingWallDuration = Math.max(
+        0.05,
+        segmentWallDuration - positionOffset / videoPlaybackRate,
+      );
+      const playbackRate = Math.min(4, Math.max(0.5, (buffer.duration * videoPlaybackRate) / segmentDuration));
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.playbackRate.value = playbackRate;
+      source.connect(gain);
+      source.onended = () => {
+        activeAudioSourcesRef.current.delete(source);
+        source.disconnect();
+      };
+      activeAudioSourcesRef.current.add(source);
+
+      const startAt = nextStart;
+      const offsetInBuffer = isCurrentSegment
+        ? Math.min(buffer.duration, positionOffset * playbackRate)
+        : 0;
+      source.start(startAt, offsetInBuffer);
+      source.stop(startAt + remainingWallDuration + 0.02);
+      nextStart = startAt + remainingWallDuration;
+    });
+
+    audioSegmentRef.current = segmentIndex;
+    setAudioAutoplayBlocked(false);
+    console.info("[Video Classroom Voice] translated audio scheduled", {
+      segmentIndex,
+      scheduledSegments: translation.segments.length - segmentIndex,
+    });
   };
 
   const syncTranslatedAudio = (position: number, shouldPlay: boolean, forceSeek = false) => {
-    const audio = audioRef.current;
     const translation = voiceRef.current;
     const video = videoRef.current;
-    const canPlay = Boolean(
-      shouldPlay &&
-        video &&
-        !video.paused &&
-        !video.ended &&
-        voiceLanguage !== "original",
-    );
     if (voiceLanguage !== "original" && video) video.muted = true;
-    if (!audio || !translation?.segments.length) {
-      console.info("[Video Classroom Voice] audio URL loaded", {
-        hasAudio: Boolean(audio),
-        segmentCount: translation?.segments.length ?? 0,
-        position,
-      });
+    if (!translation?.segments.length) {
       stopTranslatedAudio();
       return;
     }
@@ -774,71 +839,26 @@ function ClassroomPlayer({
       stopTranslatedAudio();
       return;
     }
-    const segment = translation.segments[segmentIndex];
-    if (!segment) return;
-    const offset = Math.max(0, position - segment.startTime);
-    if (audioSegmentRef.current !== segmentIndex || audio.src !== segment.audioUrl) {
-      const generation = ++audioGenerationRef.current;
-      console.info("[Video Classroom Voice] audio load started", {
-        segmentIndex,
-        audioUrl: segment.audioUrl,
-        position,
-        shouldPlay,
+    if (!shouldPlay || !video || video.paused || video.ended || voiceLanguage === "original") return;
+    if (forceSeek || activeAudioSourcesRef.current.size === 0) {
+      if (audioSchedulePromiseRef.current) return;
+      stopTranslatedAudio();
+      const schedulePromise = scheduleTranslatedAudio(position).catch((error: unknown) => {
+        if (voiceLanguage === "original") return;
+        setAudioAutoplayBlocked(true);
+        console.error("[Video Classroom Voice] translated audio scheduling failed", {
+          segmentIndex,
+          error: error instanceof Error ? error.message : String(error),
+        });
       });
-      audio.pause();
-      audioPlayPromiseRef.current = null;
-      audio.onloadedmetadata = null;
-      audio.onerror = null;
-      audio.currentTime = 0;
-      audio.removeAttribute("src");
-      audio.load();
-      audio.src = segment.audioUrl;
-      audio.preload = "auto";
+      audioSchedulePromiseRef.current = schedulePromise;
+      void schedulePromise.finally(() => {
+        if (audioSchedulePromiseRef.current === schedulePromise) {
+          audioSchedulePromiseRef.current = null;
+        }
+      });
+    } else {
       audioSegmentRef.current = segmentIndex;
-      audio.onerror = () => {
-        console.error("[Video Classroom Voice] audio error", {
-          segmentIndex,
-          audioUrl: segment.audioUrl,
-          src: audio.src,
-        });
-      };
-      audio.onloadedmetadata = () => {
-        const currentVideo = videoRef.current;
-        const currentPosition = currentVideo?.currentTime ?? 0;
-        const currentSegmentIndex = translation.segments.findIndex(
-          (currentSegment) =>
-            currentPosition >= currentSegment.startTime && currentPosition < currentSegment.endTime,
-        );
-        if (
-          generation !== audioGenerationRef.current ||
-          audioSegmentRef.current !== segmentIndex ||
-          currentSegmentIndex !== segmentIndex
-        ) {
-          return;
-        }
-        console.info("[Video Classroom Voice] audio can play", {
-          segmentIndex,
-          audioUrl: segment.audioUrl,
-          duration: audio.duration,
-          offset,
-        });
-        audio.currentTime = Math.max(0, currentPosition - segment.startTime);
-        const segmentDuration = segment.endTime - segment.startTime;
-        if (Number.isFinite(audio.duration) && segmentDuration > 0) {
-          audio.playbackRate = Math.min(2, Math.max(0.75, audio.duration / segmentDuration));
-        }
-        if (currentVideo && !currentVideo.paused && !currentVideo.ended && voiceLanguage !== "original") {
-          playTranslatedAudio(audio, segmentIndex, segment.audioUrl);
-        }
-      };
-      audio.load();
-    } else if (forceSeek) {
-      audio.currentTime = offset;
-      if (canPlay) {
-        playTranslatedAudio(audio, segmentIndex, segment.audioUrl);
-      }
-    } else if (canPlay && audio.paused) {
-      playTranslatedAudio(audio, segmentIndex, segment.audioUrl);
     }
   };
 
@@ -859,6 +879,7 @@ function ClassroomPlayer({
     if (language === "original" || language === originalLanguage) {
       setVoiceStatus("idle");
       setVoiceError(null);
+      setAudioAutoplayBlocked(false);
       if (videoRef.current) videoRef.current.muted = false;
       return;
     }
@@ -869,11 +890,11 @@ function ClassroomPlayer({
     });
     setVoiceStatus("preparing");
     setVoiceError(null);
+    setAudioAutoplayBlocked(false);
     if (videoRef.current) videoRef.current.muted = true;
     try {
-      const session = await supabase.auth.getSession();
-      const accessToken = session.data.session?.access_token;
-      if (!accessToken) throw new Error("Your session expired. Please sign in again.");
+      const session = await getFreshSupabaseSession(true);
+      const accessToken = session.access_token;
       console.info("[Video Classroom Voice Client] request sent", { requestId, language });
       const translation = await prepareVideoClassroomVoice({
         data: {
@@ -889,6 +910,8 @@ function ClassroomPlayer({
         "[Video Classroom Voice Client] audio URL count:",
         translation.segments.filter((segment) => Boolean(segment.audioUrl)).length,
       );
+      if (requestId !== voiceRequestRef.current) return;
+      await preloadTranslatedAudio(translation);
       if (requestId !== voiceRequestRef.current) return;
       voiceRef.current = translation;
       setVoiceTranslation(translation);
@@ -913,7 +936,6 @@ function ClassroomPlayer({
 
   useEffect(() => {
     void prepareVoiceRef.current(voiceLanguage);
-    const audio = audioRef.current;
     return () => stopTranslatedAudio();
   }, [voiceLanguage, classroomData.classroom.id]);
 
@@ -931,8 +953,8 @@ function ClassroomPlayer({
     const now = Date.now();
     if (!completed && now - lastSavedAt.current < 5000) return;
     lastSavedAt.current = now;
-    const session = await supabase.auth.getSession();
-    const accessToken = session.data.session?.access_token;
+    const session = await getFreshSupabaseSession();
+    const accessToken = session.access_token;
     if (!accessToken) return;
     try {
       await saveVideoClassroomProgress({
@@ -984,8 +1006,8 @@ function ClassroomPlayer({
     setEvaluating(true);
     setMessage(null);
     try {
-      const session = await supabase.auth.getSession();
-      const accessToken = session.data.session?.access_token;
+      const session = await getFreshSupabaseSession(true);
+      const accessToken = session.access_token;
       if (!accessToken) throw new Error("Your session expired. Please sign in again.");
       const result = await evaluateVideoClassroomAnswer({
         data: {
@@ -1025,8 +1047,8 @@ function ClassroomPlayer({
   };
 
   const refreshClassroom = async (accessToken?: string) => {
-    const session = await supabase.auth.getSession();
-    const token = accessToken ?? session.data.session?.access_token;
+    const session = accessToken ? null : await getFreshSupabaseSession(true);
+    const token = accessToken ?? session?.access_token;
     if (!token) throw new Error("Your session expired. Please sign in again.");
     setClassroomData(
       await getVideoClassroom({ data: { accessToken: token, classroomId: data.classroom.id } }),
@@ -1034,22 +1056,15 @@ function ClassroomPlayer({
   };
 
   const getFreshAccessToken = async () => {
-    const refreshed = await supabase.auth.refreshSession();
-    if (refreshed.data.session?.access_token) return refreshed.data.session.access_token;
-
-    const session = await supabase.auth.getSession();
-    const accessToken = session.data.session?.access_token;
-    if (!accessToken) throw new Error("Your session expired. Please sign in again.");
-    return accessToken;
+    return (await getFreshSupabaseSession(true)).access_token;
   };
 
   const startProcessing = async () => {
     setProcessing(true);
     setMessage(null);
     try {
-      const session = await supabase.auth.getSession();
-      const accessToken = session.data.session?.access_token;
-      if (!accessToken) throw new Error("Your session expired. Please sign in again.");
+      const session = await getFreshSupabaseSession(true);
+      const accessToken = session.access_token;
       await processVideoClassroom({ data: { accessToken, classroomId: data.classroom.id } });
       await refreshClassroom();
     } catch (error) {
@@ -1175,7 +1190,6 @@ function ClassroomPlayer({
               </div>
             )}
           </div>
-          <audio ref={audioRef} className="hidden" aria-hidden="true" />
           <div className="flex flex-wrap items-center gap-3 border-t p-4">
             <label
               className="flex items-center gap-2 text-sm font-semibold"
@@ -1233,6 +1247,18 @@ function ClassroomPlayer({
             {voiceError ? <span className="text-sm text-destructive">{voiceError}</span> : null}
             {voiceStatus === "ready" && voiceTranslation ? (
               <span className="text-sm text-muted-foreground">Translated teacher voice ready</span>
+            ) : null}
+            {audioAutoplayBlocked ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  syncTranslatedAudio(videoRef.current?.currentTime ?? 0, true, true)
+                }
+              >
+                Enable Hindi audio
+              </Button>
             ) : null}
           </div>
           <div className="border-t p-4">

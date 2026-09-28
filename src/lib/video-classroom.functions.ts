@@ -18,24 +18,19 @@ import type {
   VideoClassroomTopic,
 } from "@/lib/video-classroom.types";
 import { createIndicTtsProvider } from "@/lib/tts/indic-tts.provider";
-import { translateTranscriptWithBharat4U } from "@/lib/bharat4u-translation.provider";
 
 const db = supabaseAdmin as unknown as SupabaseClient<VideoClassroomDatabase>;
 
 const STORAGE_BUCKET = "ai-video-classrooms";
 const voicePreparationLocks = new Map<string, Promise<VideoClassroomVoiceTranslation>>();
+const REMOTE_VOICE_PREPARATION_WAIT_MS = 120_000;
+const STALE_VOICE_PREPARATION_MS = 10 * 60_000;
 const GEMINI_VIDEO_MODEL_CANDIDATES = getGeminiVideoModelCandidates();
 
 const GENERATE_CONTENT_TIMEOUT_MS = 3 * 60 * 1000;
 const GEMINI_VIDEO_PRIMARY_MODEL = "gemini-3.5-flash-lite";
 const GEMINI_VIDEO_FALLBACK_MODEL = "gemini-3.5-flash";
 const GENERATE_CONTENT_RETRY_DELAY_MS = 3_000;
-const TRANSLATION_MAX_ATTEMPTS = 4;
-const TRANSLATION_RETRY_DELAYS_MS = [
-  1_000,
-  2_000,
-  4_000,
-] as const;
 
 const accessTokenSchema = z.string().trim().min(20).max(4096);
 
@@ -141,6 +136,11 @@ async function getUser(accessToken: string) {
   const { data, error } = await supabaseAdmin.auth.getUser(accessToken);
 
   if (error || !data.user) {
+    console.warn("[Video Classroom Auth] Supabase rejected the access token", {
+      code: error?.code,
+      status: error?.status,
+      message: error?.message,
+    });
     throw new Error("Authentication required. Please sign in again.");
   }
 
@@ -739,145 +739,62 @@ async function translateVoiceSegments(
     return transcript.map((segment) => segment.text);
   }
 
+  const client = createGeminiClient();
+  const batchSize = 40;
+  const translated: string[] = [];
+
   console.info(
-    `[Video Classroom Voice] Translating ${transcript.length} segments from ${from} to ${to} via Bharat4U.`,
+    `[Video Classroom Voice] Translating ${transcript.length} segments from ${from} to ${to} via Gemini.`,
   );
 
-  const translated = await translateTranscriptWithBharat4U({
-    transcript: transcript.map((segment, segmentIndex) => ({
-      segmentIndex,
-      startTime: segment.startTime,
-      endTime: segment.endTime,
+  for (let offset = 0; offset < transcript.length; offset += batchSize) {
+    const batch = transcript.slice(offset, offset + batchSize).map((segment, batchIndex) => ({
+      segmentIndex: offset + batchIndex,
       text: segment.text,
-    })),
-    from,
-    to,
-  });
-
-  if (translated.length !== transcript.length) {
-    throw new Error(
-      `Bharat4U returned ${translated.length} translated segments for ${transcript.length} transcript segments.`,
+    }));
+    const result = await generateContentWithRetry(
+      (modelName) =>
+        client.models.generateContent({
+          model: modelName,
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: `Translate every transcript segment from language code ${from} to language code ${to}. Preserve the order and return only a JSON string array with exactly ${batch.length} non-empty translated strings. Do not add explanations, Markdown, timestamps, or speaker labels. Transcript: ${JSON.stringify(batch)}`,
+                },
+              ],
+            },
+          ],
+          config: { responseMimeType: "application/json" },
+        }),
+      GEMINI_VIDEO_MODEL_CANDIDATES,
     );
+
+    let parsedResponse: unknown;
+    try {
+      parsedResponse = parseJsonResponse(result.response.text ?? "");
+    } catch {
+      throw new Error("Gemini returned invalid JSON for classroom voice translation.");
+    }
+
+    const candidate = Array.isArray(parsedResponse)
+      ? parsedResponse
+      : parsedResponse && typeof parsedResponse === "object" && "translations" in parsedResponse
+        ? (parsedResponse as { translations?: unknown }).translations
+        : undefined;
+    const parsedTranslations = z.array(z.string().trim().min(1)).safeParse(candidate);
+
+    if (!parsedTranslations.success || parsedTranslations.data.length !== batch.length) {
+      throw new Error(
+        `Gemini returned an invalid translation batch: expected ${batch.length} segments.`,
+      );
+    }
+
+    translated.push(...parsedTranslations.data);
   }
 
   return translated;
-}
-
-function translationErrorStatus(error: unknown): string {
-  const details =
-    error && typeof error === "object"
-      ? (error as {
-          status?: unknown;
-          statusCode?: unknown;
-          code?: unknown;
-          error?: { status?: unknown; code?: unknown };
-        })
-      : {};
-
-  const nested = details.error;
-  const status = details.status ?? details.statusCode ?? nested?.status;
-  const code = details.code ?? nested?.code;
-
-  return [status, code]
-    .filter((value) => typeof value === "number" || typeof value === "string")
-    .map((value) => String(value).toLowerCase())
-    .join("/");
-}
-
-function translationRetryAfterMs(error: unknown): number | undefined {
-  const details =
-    error && typeof error === "object"
-      ? (error as {
-          retryAfter?: unknown;
-          retry_after?: unknown;
-          headers?: { get?: (name: string) => string | null } | Record<string, unknown>;
-          error?: { retryAfter?: unknown; retry_after?: unknown };
-        })
-      : {};
-
-  const headerValue =
-    typeof details.headers?.get === "function"
-      ? details.headers.get("retry-after")
-      : details.headers && typeof details.headers === "object"
-        ? (details.headers as Record<string, unknown>)["retry-after"] ??
-          (details.headers as Record<string, unknown>)["Retry-After"]
-        : undefined;
-  const value =
-    details.retryAfter ??
-    details.retry_after ??
-    details.error?.retryAfter ??
-    details.error?.retry_after ??
-    headerValue;
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return Math.min(60_000, Math.max(0, value * 1_000));
-  }
-
-  if (typeof value !== "string") return undefined;
-
-  const seconds = Number(value);
-  if (Number.isFinite(seconds)) {
-    return Math.min(60_000, Math.max(0, seconds * 1_000));
-  }
-
-  const retryAt = Date.parse(value);
-  return Number.isNaN(retryAt)
-    ? undefined
-    : Math.min(60_000, Math.max(0, retryAt - Date.now()));
-}
-
-function isTransientTranslationError(error: unknown): boolean {
-  const status = translationErrorStatus(error);
-  const text = providerErrorText(error);
-
-  return (
-    !isDailyGenerateQuotaError(error) &&
-    (status.includes("503") ||
-      status.includes("unavailable") ||
-      text.includes("service unavailable") ||
-      text.includes("temporarily unavailable") ||
-      text.includes("high demand"))
-  );
-}
-
-async function generateTranslationContentWithRetry<T>(
-  requestFactory: () => Promise<T>,
-): Promise<T> {
-  for (let attempt = 1; attempt <= TRANSLATION_MAX_ATTEMPTS; attempt += 1) {
-    console.info(
-      `[Video Classroom Voice] Translation attempt ${attempt}/${TRANSLATION_MAX_ATTEMPTS}`,
-    );
-
-    try {
-      const response = await generateContentWithTimeout(requestFactory);
-      console.info("[Video Classroom Voice] Translation succeeded", { attempt });
-      return response;
-    } catch (error) {
-      const transient = isTransientTranslationError(error);
-      const isLastAttempt = attempt === TRANSLATION_MAX_ATTEMPTS;
-
-      if (!transient || isLastAttempt) {
-        throw error;
-      }
-
-      const retryAfterMs = translationRetryAfterMs(error);
-      const baseDelay =
-        TRANSLATION_RETRY_DELAYS_MS[attempt - 1] ??
-        TRANSLATION_RETRY_DELAYS_MS.at(-1)!;
-      const jitter = Math.floor(Math.random() * Math.min(1_000, baseDelay * 0.25));
-      const delay = Math.min(60_000, retryAfterMs ?? baseDelay + jitter);
-
-      console.warn("[Video Classroom Voice] Gemini transient 503", {
-        attempt,
-        status: translationErrorStatus(error),
-        retryAfterMs,
-      });
-      console.info(`[Video Classroom Voice] Waiting ${delay} ms before retry`);
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-  }
-
-  throw new Error("Gemini translation retry loop exited unexpectedly.");
 }
 
 async function transcriptVersion(
@@ -2016,6 +1933,34 @@ export const prepareVideoClassroomVoice =
         } satisfies VideoClassroomVoiceTranslation;
       };
 
+      const waitForRemotePreparation = async (translationId: string) => {
+        const deadline = Date.now() + REMOTE_VOICE_PREPARATION_WAIT_MS;
+
+        while (Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+          const { data: current, error: currentError } = await db
+            .from("ai_video_classroom_translations")
+            .select("*")
+            .eq("id", translationId)
+            .maybeSingle();
+
+          if (currentError) {
+            throw new Error(`Could not check translated voice status: ${currentError.message}`);
+          }
+
+          if (current?.status === "ready") {
+            return readReadyTranslation(translationId);
+          }
+
+          if (current?.status === "failed") {
+            return null;
+          }
+        }
+
+        return null;
+      };
+
       if (existing?.status === "ready") {
         console.info("[Video Classroom Voice] cache hit: ready", {
           translationId: existing.id,
@@ -2043,9 +1988,50 @@ export const prepareVideoClassroomVoice =
 
         const preparingLock = voicePreparationLocks.get(singleFlightKey);
         if (preparingLock) return preparingLock;
-        throw new Error(
-          "Translated voice is preparing in another server instance. Please retry after it reaches READY.",
-        );
+
+        const remoteTranslation = await waitForRemotePreparation(existing.id);
+        if (remoteTranslation) return remoteTranslation;
+
+        const { data: latestPreparing, error: latestPreparingError } = await db
+          .from("ai_video_classroom_translations")
+          .select("status, updated_at")
+          .eq("id", existing.id)
+          .maybeSingle();
+
+        if (latestPreparingError) {
+          throw new Error(`Could not recheck translated voice status: ${latestPreparingError.message}`);
+        }
+
+        const updatedAt = latestPreparing?.updated_at
+          ? Date.parse(latestPreparing.updated_at)
+          : Number.NaN;
+        const isStale =
+          latestPreparing?.status === "preparing" &&
+          (!Number.isFinite(updatedAt) || Date.now() - updatedAt > STALE_VOICE_PREPARATION_MS);
+
+        if (!latestPreparing || latestPreparing.status === "failed") {
+          console.info("[Video Classroom Voice] retrying after remote preparation failed", {
+            translationId: existing.id,
+          });
+        } else if (!isStale) {
+          throw new Error(
+            "Translated voice is still preparing. Please retry after it reaches READY.",
+          );
+        } else {
+          console.warn("[Video Classroom Voice] reclaiming stale preparation", {
+            translationId: existing.id,
+            updatedAt: latestPreparing.updated_at,
+          });
+          await db
+            .from("ai_video_classroom_translations")
+            .update({
+              status: "failed",
+              error_message: "Previous voice preparation expired and will be retried.",
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", existing.id)
+            .eq("status", "preparing");
+        }
       }
 
       const { data: cachedSegments, error: cachedSegmentsError } = existing

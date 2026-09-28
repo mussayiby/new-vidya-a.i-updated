@@ -2,7 +2,21 @@
 
 ## Video classroom setup
 
-The classroom pipeline uses Gemini for transcript translation and the local AI4Bharat Indic-TTS service for generated speech. The browser never sees API keys or model paths. The Node server calls the local endpoint at `INDIC_TTS_URL` and uploads the returned WAV files to the existing `ai-video-classrooms` storage bucket.
+The classroom pipeline uses Gemini to analyze the uploaded lesson and translate its timestamped transcript, then uses the local AI4Bharat Indic-TTS service to generate translated teacher speech. The browser never sees API keys or model paths. The Node server uploads the returned WAV files to the existing `ai-video-classrooms` storage bucket.
+
+### Translated voice prerequisites
+
+Set `GEMINI_API_KEY` in the app environment. No Bhashini or Bharat4U key is required for this flow. Start the local Indic-TTS service before selecting a student language:
+
+The app accepts `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` from the same `.env` file. Vite exposes only the URL and publishable key to the browser; the service-role key and `GEMINI_API_KEY` remain server-only.
+
+```powershell
+cd services/indic-tts
+$env:INDIC_TTS_MODEL_ROOT = "$PWD\models"
+python app.py
+```
+
+The app calls `http://127.0.0.1:8001/health` and `http://127.0.0.1:8001/synthesize` through `INDIC_TTS_URL`. Gemini performs the transcript translation on the server; the browser receives only signed audio URLs.
 
 Build a production-quality React + Vite web application called "Vidya A.I."
 
